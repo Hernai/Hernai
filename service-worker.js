@@ -165,8 +165,8 @@ self.addEventListener('push', (event) => {
 
     const options = {
         body: event.data ? event.data.text() : 'Nueva notificación',
-        icon: './assets/icons/icon-192x192.png',
-        badge: './assets/icons/icon-72x72.png',
+        icon: './assets/icons/icon-192x192.svg',
+        badge: './assets/icons/icon-72x72.svg',
         vibrate: [200, 100, 200],
         tag: 'ine-scanner-notification',
         requireInteraction: false

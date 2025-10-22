@@ -1,0 +1,63 @@
+#!/usr/bin/env node
+
+/**
+ * Generador de iconos PNG para PWA
+ * Crea iconos simples de color sólido con el texto "INE AI"
+ */
+
+const fs = require('fs');
+const path = require('path');
+
+// Función para crear iconos estilo Material Design
+function createMaterialIcon(size) {
+    // Icono estilo Material: credit_card + auto_awesome (IA)
+    const svg = `<svg width="${size}" height="${size}" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <defs>
+    <linearGradient id="grad${size}" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#667eea;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#764ba2;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+
+  <!-- Background con esquinas redondeadas estilo Material -->
+  <rect width="24" height="24" fill="url(#grad${size})" rx="5"/>
+
+  <!-- Icono de tarjeta de crédito/ID (Material Design style) -->
+  <g transform="translate(3, 6)">
+    <!-- Card outline -->
+    <rect x="0" y="0" width="18" height="11" rx="1.5" fill="none" stroke="white" stroke-width="1.2" opacity="0.95"/>
+
+    <!-- Magnetic strip -->
+    <rect x="0" y="2" width="18" height="2.5" fill="white" opacity="0.7"/>
+
+    <!-- Text lines -->
+    <rect x="2" y="6" width="8" height="0.8" rx="0.4" fill="white" opacity="0.8"/>
+    <rect x="2" y="8" width="12" height="0.8" rx="0.4" fill="white" opacity="0.8"/>
+  </g>
+
+  <!-- AI sparkle badge (Material Design auto_awesome icon style) -->
+  <g transform="translate(15, 15)">
+    <!-- Star/sparkle shape -->
+    <path d="M 4 0 L 4.5 2 L 6 2.5 L 4.5 3 L 4 5 L 3.5 3 L 2 2.5 L 3.5 2 Z" fill="white" opacity="0.95"/>
+    <path d="M 1.5 1 L 1.8 1.8 L 2.5 2 L 1.8 2.2 L 1.5 3 L 1.2 2.2 L 0.5 2 L 1.2 1.8 Z" fill="white" opacity="0.85"/>
+  </g>
+</svg>`;
+
+    return svg;
+}
+
+// Tamaños a generar
+const sizes = [72, 96, 128, 144, 152, 192, 384, 512];
+
+console.log('Generando iconos SVG (compatibles con navegadores)...');
+
+sizes.forEach(size => {
+    const svg = createMaterialIcon(size);
+    const filename = path.join(__dirname, 'assets', 'icons', `icon-${size}x${size}.svg`);
+    fs.writeFileSync(filename, svg);
+    console.log(`✓ Generado: icon-${size}x${size}.svg (${size}x${size})`);
+});
+
+console.log('\n✅ Todos los iconos estilo Material Design generados correctamente');
+console.log('📦 Iconos SVG: más ligeros y escalables que PNG');
+console.log('🎨 Estilo: Material Design con gradiente púrpura');
