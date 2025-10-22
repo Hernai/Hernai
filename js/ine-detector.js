@@ -6,6 +6,9 @@
 class INEDetector {
     constructor() {
         this.isInitialized = false;
+        this.onnxRuntime = null;  // Para clasificadores ML
+        this.templateCache = new Map();  // Cache de templates cargados
+
         this.config = {
             // Patrones regex para campos de INE
             patterns: {
@@ -70,6 +73,15 @@ class INEDetector {
             this.compiledPatterns = {};
             for (const [key, pattern] of Object.entries(this.config.patterns)) {
                 this.compiledPatterns[key] = new RegExp(pattern.source, pattern.flags);
+            }
+
+            // Initialize ONNX Runtime for model classification
+            if (typeof ONNXRuntime !== 'undefined') {
+                this.onnxRuntime = new ONNXRuntime();
+                await this.onnxRuntime.initialize();
+                console.log('[INE-Detector] ONNX Runtime initialized');
+            } else {
+                console.warn('[INE-Detector] ONNX Runtime not available, using fallbacks');
             }
 
             this.isInitialized = true;
@@ -174,7 +186,10 @@ class INEDetector {
                     console.log(`[INE-Detector] 📊 Confidence adjusted: ${Math.round(finalConfidence)}% → ${result.confidence}% (side: ${sideResult.sideConfidence}%)`);
                 }
 
-                result.model = this.determineModel(ocrText, patternScore.matches);
+                // Classify INE model (INE_2019, INE_2023, INE_v3_1, unknown)
+                const modelResult = await this.classifyModel(imageData, ocrText, patternScore.matches);
+                result.model = modelResult.model;
+                result.modelConfidence = modelResult.confidence;
             }
 
             // Step 6: Add reasons
@@ -494,28 +509,216 @@ class INEDetector {
     }
 
     /**
-     * Determine INE model (F, G, H, etc.)
+     * Classify INE model with ONNX + template matching + heuristics
+     * @param {*} imageData - Image to classify
+     * @param {string} ocrText - OCR text from image
+     * @param {Object} patternMatches - Pattern matches from OCR
+     * @returns {Promise<{model: string, confidence: number}>}
      */
-    determineModel(ocrText, patternMatches) {
-        const normalizedText = this.normalizeText(ocrText);
+    async classifyModel(imageData, ocrText, patternMatches) {
+        console.log('[INE-Detector] Classifying INE model...');
 
-        // Model H indicators (most recent)
-        if (normalizedText.includes('DESDE EL EXTRANJERO') ||
-            normalizedText.includes('FROM ABROAD')) {
-            return 'H (con foto)';
+        // Step 1: Try ONNX classifier first
+        if (this.onnxRuntime) {
+            try {
+                const onnxResult = await this.onnxRuntime.classifyModel(imageData);
+                if (onnxResult.confidence > 0.80) {
+                    console.log(`[INE-Detector] ✅ ONNX classified as ${onnxResult.model} (${(onnxResult.confidence * 100).toFixed(1)}%)`);
+                    return { model: onnxResult.model, confidence: onnxResult.confidence * 100 };
+                } else {
+                    console.log(`[INE-Detector] ⚠️ ONNX confidence too low (${(onnxResult.confidence * 100).toFixed(1)}%), trying fallbacks`);
+                }
+            } catch (error) {
+                console.warn('[INE-Detector] ONNX classification failed:', error.message);
+            }
         }
 
-        // Model G indicators
-        if (patternMatches.OCR && patternMatches.OCR[0] && patternMatches.OCR[0].length === 13) {
-            return 'G o H';
+        // Step 2: Template matching with anchors
+        const templateResult = await this.templateMatching(imageData);
+        if (templateResult.confidence >= 0.75) {
+            console.log(`[INE-Detector] ✅ Template matching: ${templateResult.model} (${(templateResult.confidence * 100).toFixed(1)}%)`);
+            return { model: templateResult.model, confidence: templateResult.confidence * 100 };
         }
 
-        // Model F indicators
-        if (patternMatches.CIC) {
-            return 'F';
+        // Step 3: Heuristic detection from OCR text
+        const heuristicResult = this.heuristicModelDetection(ocrText, patternMatches);
+        console.log(`[INE-Detector] Using heuristic: ${heuristicResult.model} (${heuristicResult.confidence.toFixed(1)}%)`);
+
+        return heuristicResult;
+    }
+
+    /**
+     * Template matching using OpenCV with anchor images
+     * @param {*} imageData - Image to match
+     * @returns {Promise<{model: string, confidence: number}>}
+     */
+    async templateMatching(imageData) {
+        console.log('[INE-Detector] Running template matching with anchors...');
+
+        if (typeof cv === 'undefined' || !cv.Mat) {
+            console.warn('[INE-Detector] OpenCV not available for template matching');
+            return { model: 'unknown', confidence: 0 };
         }
 
-        return 'G o superior (estimado)';
+        const models = ['ine_2019', 'ine_2023', 'ine_v3_1'];
+        let bestMatch = { model: 'unknown', confidence: 0 };
+
+        try {
+            // Load source image
+            const srcCanvas = typeof imageData === 'string'
+                ? await this.imageToCanvas(imageData)
+                : imageData;
+
+            const src = cv.imread(srcCanvas);
+            const srcGray = new cv.Mat();
+            cv.cvtColor(src, srcGray, cv.COLOR_RGBA2GRAY);
+
+            // Try each model's anchors
+            for (const modelName of models) {
+                const templatePath = `./assets/templates/${modelName}_anchors.png`;
+                const template = await this.loadTemplate(templatePath, modelName);
+
+                if (!template) {
+                    console.log(`[INE-Detector] No template found for ${modelName}, skipping`);
+                    continue;
+                }
+
+                // Template matching
+                const result = new cv.Mat();
+                const mask = new cv.Mat();
+
+                try {
+                    cv.matchTemplate(srcGray, template, result, cv.TM_CCOEFF_NORMED, mask);
+
+                    // Find max value
+                    const minMax = cv.minMaxLoc(result);
+                    const maxVal = minMax.maxVal;
+
+                    console.log(`[INE-Detector] ${modelName}: match score = ${(maxVal * 100).toFixed(1)}%`);
+
+                    if (maxVal > bestMatch.confidence) {
+                        // Map filename to spec model names
+                        const modelMap = {
+                            'ine_2019': 'INE_2019',
+                            'ine_2023': 'INE_2023',
+                            'ine_v3_1': 'INE_v3_1'
+                        };
+
+                        bestMatch = {
+                            model: modelMap[modelName] || 'unknown',
+                            confidence: maxVal
+                        };
+                    }
+                } finally {
+                    result.delete();
+                    mask.delete();
+                }
+
+                template.delete();
+            }
+
+            srcGray.delete();
+            src.delete();
+
+        } catch (error) {
+            console.error('[INE-Detector] Template matching error:', error);
+        }
+
+        return bestMatch;
+    }
+
+    /**
+     * Heuristic model detection from OCR text
+     * @param {string} ocrText - OCR text
+     * @param {Object} patternMatches - Pattern matches
+     * @returns {{model: string, confidence: number}}
+     */
+    heuristicModelDetection(ocrText, patternMatches) {
+        if (!ocrText) {
+            return { model: 'unknown', confidence: 0 };
+        }
+
+        const text = this.normalizeText(ocrText);
+
+        // INE_2023 (Modelo H) - Indicador más específico
+        if (text.includes('DESDE EL EXTRANJERO') || text.includes('FROM ABROAD')) {
+            return { model: 'INE_2023', confidence: 85 };
+        }
+
+        // INE_2019 (Modelo G) - OCR de 13 dígitos sin texto de extranjero
+        if (patternMatches.OCR && patternMatches.OCR.length > 0) {
+            const hasOCR13 = patternMatches.OCR.some(ocr => ocr.length === 13);
+            if (hasOCR13 && !text.includes('FROM ABROAD')) {
+                return { model: 'INE_2019', confidence: 70 };
+            }
+        }
+
+        // Modelo F (antiguo) - Tiene CIC en lugar de OCR
+        if (patternMatches.CIC && !patternMatches.OCR) {
+            return { model: 'INE_2019', confidence: 60 };  // Mapear F a 2019 genérico
+        }
+
+        // INE_v3_1 - Características específicas (placeholder)
+        // TODO: Agregar indicadores específicos de v3.1 cuando se conozcan
+
+        // Default: unknown
+        return { model: 'unknown', confidence: 0 };
+    }
+
+    /**
+     * Load template image from path
+     * @param {string} path - Path to template image
+     * @param {string} modelName - Model name for caching
+     * @returns {Promise<cv.Mat|null>}
+     */
+    async loadTemplate(path, modelName) {
+        // Check cache first
+        if (this.templateCache.has(modelName)) {
+            return this.templateCache.get(modelName).clone();
+        }
+
+        try {
+            const response = await fetch(path);
+            if (!response.ok) {
+                return null;
+            }
+
+            const blob = await response.blob();
+            const img = await this.loadImage(blob);
+            const canvas = document.createElement('canvas');
+            canvas.width = img.width;
+            canvas.height = img.height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0);
+
+            const template = cv.imread(canvas);
+            const templateGray = new cv.Mat();
+            cv.cvtColor(template, templateGray, cv.COLOR_RGBA2GRAY);
+
+            // Cache the grayscale template
+            this.templateCache.set(modelName, templateGray.clone());
+
+            template.delete();
+
+            return templateGray;
+
+        } catch (error) {
+            console.warn(`[INE-Detector] Failed to load template ${path}:`, error.message);
+            return null;
+        }
+    }
+
+    /**
+     * Helper: Convert image to canvas
+     */
+    async imageToCanvas(imageSource) {
+        const img = await this.loadImage(imageSource);
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+        return canvas;
     }
 
     /**
