@@ -79,13 +79,20 @@ class OCREngine {
             }
 
             console.log('[OCR] Loading Tesseract.js...');
-            this.tesseractWorker = await Tesseract.createWorker(this.config.tesseract.lang, 1, {
+
+            // Create worker with Tesseract.js v5 API
+            this.tesseractWorker = await Tesseract.createWorker({
                 logger: (m) => {
+                    console.log('[OCR]', m);
                     if (onProgress && m.status === 'recognizing text') {
                         onProgress(m.progress * 100);
                     }
                 }
             });
+
+            // Load and initialize language
+            await this.tesseractWorker.loadLanguage(this.config.tesseract.lang);
+            await this.tesseractWorker.initialize(this.config.tesseract.lang);
 
             await this.tesseractWorker.setParameters({
                 tessedit_pageseg_mode: this.config.tesseract.psm,

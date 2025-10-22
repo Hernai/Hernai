@@ -35,7 +35,7 @@ const elements = {
 };
 
 // Initialize Application
-let app = null;
+// Note: app is declared in app.js as a global variable
 
 document.addEventListener('DOMContentLoaded', async () => {
     console.log('[Main] Initializing UI...');
