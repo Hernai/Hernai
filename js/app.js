@@ -11,6 +11,13 @@ class HernAI {
         this.extractor = new FieldExtractor();
         this.aiExtractor = new AIFieldExtractor();  // AI-powered field extraction
 
+        // Anti-fraud modules (Fase 2)
+        this.dedupeHash = new DedupeHash();
+        this.antiFraudMoire = new AntiFraudMoire();
+        this.antiFraudELA = new AntiFraudELA();
+        this.linkFrontBack = new LinkFrontBack();
+        this.faceMatch = new FaceMatch();
+
         this.state = {
             frontImage: null,
             backImage: null,
@@ -507,6 +514,238 @@ class HernAI {
                 reject(new Error('Invalid image source'));
             }
         });
+    }
+
+    /**
+     * Run complete INE pipeline with anti-fraud detection
+     * Processes BOTH front and back images with full fraud detection
+     *
+     * @param {File|Blob|HTMLImageElement} frontImage - Front image
+     * @param {File|Blob|HTMLImageElement} backImage - Back image
+     * @param {Function} onProgress - Progress callback
+     * @returns {Promise<Object>} Complete result with anti-fraud signals
+     */
+    async runINEPipelineWithAntiFraud(frontImage, backImage, onProgress = null) {
+        if (!this.isInitialized) {
+            throw new Error('Application not initialized. Call initialize() first.');
+        }
+
+        console.log('[HernAI] Starting complete INE pipeline with anti-fraud...');
+
+        const timings = {
+            pre: 0,
+            classify: 0,
+            ocr: 0,
+            qr: 0,
+            post: 0,
+            antifraud: 0,
+            link: 0
+        };
+
+        try {
+            // ============================================================
+            // PHASE 1-5: Process front and back individually
+            // ============================================================
+            if (onProgress) onProgress({ stage: 'processing_front', progress: 5 });
+
+            const t0 = performance.now();
+            const frontResult = await this.runINEPipeline(frontImage, (p) => {
+                if (onProgress) onProgress({ stage: `front_${p.stage}`, progress: 5 + (p.progress * 0.35) });
+            });
+            const frontTime = performance.now() - t0;
+
+            if (onProgress) onProgress({ stage: 'processing_back', progress: 45 });
+
+            const t1 = performance.now();
+            const backResult = await this.runINEPipeline(backImage, (p) => {
+                if (onProgress) onProgress({ stage: `back_${p.stage}`, progress: 45 + (p.progress * 0.35) });
+            });
+            const backTime = performance.now() - t1;
+
+            console.log(`[HernAI] Front processed in ${frontTime.toFixed(0)}ms, Back in ${backTime.toFixed(0)}ms`);
+
+            // ============================================================
+            // PHASE 6: ANTI-FRAUD DETECTION
+            // ============================================================
+            if (onProgress) onProgress({ stage: 'antifraud', progress: 85 });
+
+            const t2 = performance.now();
+
+            // 6.1 Duplicate detection (compare front vs back)
+            const duplicateCheck = await this.dedupeHash.compareImages(
+                frontResult._canvas || frontImage,
+                backResult._canvas || backImage
+            );
+
+            // 6.2 Moiré detection (recapture detection)
+            const moireFront = await this.antiFraudMoire.detectMoire(frontImage);
+            const moireBack = await this.antiFraudMoire.detectMoire(backImage);
+
+            // 6.3 Error Level Analysis (tampering detection)
+            const elaFront = await this.antiFraudELA.analyzeELA(frontImage);
+            const elaBack = await this.antiFraudELA.analyzeELA(backImage);
+
+            timings.antifraud = Math.round(performance.now() - t2);
+            console.log(`[HernAI] Anti-fraud analysis: ${timings.antifraud}ms`);
+
+            // ============================================================
+            // PHASE 7: CROSS-VALIDATION (Front ↔ Back)
+            // ============================================================
+            if (onProgress) onProgress({ stage: 'cross_validation', progress: 92 });
+
+            const t3 = performance.now();
+
+            const crossValidation = this.linkFrontBack.validateCrossConsistency(
+                frontResult,
+                backResult
+            );
+
+            timings.link = Math.round(performance.now() - t3);
+            console.log(`[HernAI] Cross-validation: ${timings.link}ms`);
+
+            // ============================================================
+            // PHASE 8: BUILD COMPLETE RESULT
+            // ============================================================
+            if (onProgress) onProgress({ stage: 'building_result', progress: 96 });
+
+            // Combinar fields de ambos lados
+            const combinedFields = {
+                ...frontResult.fields,
+                ...backResult.fields
+            };
+
+            // Calcular confidence overall combinado
+            const allConfidences = [
+                ...Object.values(frontResult.fields).filter(f => f && typeof f.confidence === 'number').map(f => f.confidence),
+                ...Object.values(backResult.fields).filter(f => f && typeof f.confidence === 'number').map(f => f.confidence)
+            ];
+
+            const confidence_overall = allConfidences.length > 0
+                ? allConfidences.reduce((a, b) => a + b, 0) / allConfidences.length
+                : 0;
+
+            // Calcular score total de anti-fraude (0-100)
+            const antiFraudScore = this.calculateAntiFraudScore({
+                duplicate: duplicateCheck,
+                moire_front: moireFront,
+                moire_back: moireBack,
+                ela_front: elaFront,
+                ela_back: elaBack,
+                cross_validation: crossValidation
+            });
+
+            // Determinar riesgo general
+            const overallRisk = this.classifyOverallRisk(antiFraudScore);
+
+            // Resultado completo
+            const result = {
+                front: frontResult,
+                back: backResult,
+                combined_fields: combinedFields,
+                confidence_overall: Math.round(confidence_overall * 10) / 10,
+                cross_validation: crossValidation,
+                antifraud: {
+                    score: antiFraudScore,
+                    risk_level: overallRisk,
+                    signals: {
+                        duplicate_detection: {
+                            is_duplicate: duplicateCheck.is_duplicate,
+                            similarity: duplicateCheck.similarity_score,
+                            classification: duplicateCheck.classification
+                        },
+                        moire_detection: {
+                            front: {
+                                has_moire: moireFront.has_moire,
+                                score: moireFront.moire_score,
+                                risk: moireFront.risk_level
+                            },
+                            back: {
+                                has_moire: moireBack.has_moire,
+                                score: moireBack.moire_score,
+                                risk: moireBack.risk_level
+                            }
+                        },
+                        tampering_detection: {
+                            front: {
+                                is_manipulated: elaFront.is_manipulated,
+                                score: elaFront.manipulation_score,
+                                risk: elaFront.risk_level
+                            },
+                            back: {
+                                is_manipulated: elaBack.is_manipulated,
+                                score: elaBack.manipulation_score,
+                                risk: elaBack.risk_level
+                            }
+                        }
+                    }
+                },
+                timings_ms: {
+                    front_total: Math.round(frontTime),
+                    back_total: Math.round(backTime),
+                    antifraud: timings.antifraud,
+                    cross_validation: timings.link,
+                    total: Math.round(frontTime + backTime + timings.antifraud + timings.link)
+                }
+            };
+
+            if (onProgress) onProgress({ stage: 'complete', progress: 100 });
+
+            console.log(`[HernAI] Complete pipeline: ${result.timings_ms.total}ms, Anti-fraud score: ${antiFraudScore}, Risk: ${overallRisk}`);
+
+            return result;
+
+        } catch (error) {
+            console.error('[HernAI] Pipeline with anti-fraud failed:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Calcula score de anti-fraude (0-100)
+     * 100 = sin fraude, 0 = alto riesgo de fraude
+     */
+    calculateAntiFraudScore(signals) {
+        let score = 100;
+
+        // Penalizar por duplicados (mismo anverso y reverso = ERROR GRAVE)
+        if (signals.duplicate.is_duplicate) {
+            score -= 80; // Penalización severa
+        } else if (signals.duplicate.is_similar) {
+            score -= 30;
+        }
+
+        // Penalizar por moiré (recaptura)
+        if (signals.moire_front.has_moire) {
+            score -= signals.moire_front.moire_score * 40;
+        }
+        if (signals.moire_back.has_moire) {
+            score -= signals.moire_back.moire_score * 40;
+        }
+
+        // Penalizar por manipulación (ELA)
+        if (signals.ela_front.is_manipulated) {
+            score -= signals.ela_front.manipulation_score * 0.3;
+        }
+        if (signals.ela_back.is_manipulated) {
+            score -= signals.ela_back.manipulation_score * 0.3;
+        }
+
+        // Penalizar por inconsistencias cruzadas
+        if (!signals.cross_validation.is_consistent) {
+            score -= (100 - signals.cross_validation.consistency_score) * 0.5;
+        }
+
+        return Math.max(0, Math.min(100, Math.round(score)));
+    }
+
+    /**
+     * Clasificar riesgo general
+     */
+    classifyOverallRisk(score) {
+        if (score >= 80) return 'low';
+        if (score >= 60) return 'medium';
+        if (score >= 40) return 'high';
+        return 'critical';
     }
 
     /**
