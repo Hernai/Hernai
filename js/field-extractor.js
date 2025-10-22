@@ -252,6 +252,61 @@ class FieldExtractor {
     }
 
     /**
+     * Extract OCR code - exactly 13 digits
+     * Handles cases where extra digits are captured
+     */
+    extractOCRCode(text) {
+        if (!text) return '';
+
+        const upperText = text.toUpperCase();
+
+        // Strategy 1: Look for "OCR" keyword followed by 13 digits
+        const ocrKeywordMatch = upperText.match(/OCR[\s:]*(\d[\d\s\-]{11,15}\d)/i);
+        if (ocrKeywordMatch) {
+            const cleaned = ocrKeywordMatch[1].replace(/[\s\-]/g, '');
+            // Extract exactly 13 digits from the start
+            if (cleaned.length >= 13) {
+                const code = cleaned.substring(0, 13);
+                if (this.validateOCR(code)) {
+                    console.log('[FieldExtractor] OCR code extracted (keyword):', code);
+                    return code;
+                }
+            }
+        }
+
+        // Strategy 2: Find all 13+ digit sequences and extract exactly 13
+        const digitSequences = text.match(/\d{13,}/g);
+        if (digitSequences) {
+            for (const sequence of digitSequences) {
+                // Try to extract exactly 13 digits
+                const code = sequence.substring(0, 13);
+                if (this.validateOCR(code)) {
+                    console.log('[FieldExtractor] OCR code extracted (sequence):', code);
+                    return code;
+                }
+            }
+        }
+
+        // Strategy 3: Find sequences with spaces/hyphens and clean them
+        const spacedSequences = text.match(/\d[\d\s\-]{11,}\d/g);
+        if (spacedSequences) {
+            for (const sequence of spacedSequences) {
+                const cleaned = sequence.replace(/[\s\-]/g, '');
+                if (cleaned.length >= 13) {
+                    const code = cleaned.substring(0, 13);
+                    if (this.validateOCR(code)) {
+                        console.log('[FieldExtractor] OCR code extracted (spaced):', code);
+                        return code;
+                    }
+                }
+            }
+        }
+
+        console.log('[FieldExtractor] OCR code not found');
+        return '';
+    }
+
+    /**
      * Extract electoral data
      */
     extractElectoralData(textFront, textBack, ocrDataFront, ocrDataBack, fieldLocations) {
@@ -261,8 +316,8 @@ class FieldExtractor {
         // Try both sides for clave elector
         const claveElectorMatch = this.extractField('CLAVE_ELECTOR', combinedText);
 
-        // OCR code is usually on back
-        const ocrMatch = this.extractField('OCR', textBack) || this.extractField('OCR', textFront);
+        // OCR code is usually on back - use improved extraction
+        const ocrCode = this.extractOCRCode(textBack) || this.extractOCRCode(textFront);
 
         // CIC for older models
         const cicMatch = this.extractField('CIC', combinedText);
@@ -282,9 +337,9 @@ class FieldExtractor {
                 obligatorio: true
             },
             ocr: {
-                valor: ocrMatch ? ocrMatch.value : '',
-                confianza: ocrMatch ? ocrMatch.confidence : 0,
-                valido: ocrMatch ? this.validateOCR(ocrMatch.value) : false,
+                valor: ocrCode || '',
+                confianza: ocrCode ? 90 : 0,
+                valido: ocrCode ? this.validateOCR(ocrCode) : false,
                 fuente: 'ocr',
                 obligatorio: true
             },
