@@ -324,7 +324,7 @@ class LinkFrontBack {
 
         const correctFront = sideFront === 'front';
         const correctBack = sideBack === 'back';
-        const both Correct = correctFront && correctBack;
+        const bothCorrect = correctFront && correctBack;
 
         return {
             passed: bothCorrect,

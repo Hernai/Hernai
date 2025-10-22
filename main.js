@@ -174,9 +174,7 @@ function removeImage(side) {
 }
 
 function updateButtonStates() {
-    const hasB
-
-othImages = state.frontFile && state.backFile;
+    const hasBothImages = state.frontFile && state.backFile;
     elements.btnProcess.disabled = !hasBothImages || state.isProcessing;
     elements.btnProcessFraud.disabled = !hasBothImages || state.isProcessing;
 
