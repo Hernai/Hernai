@@ -3,7 +3,7 @@
  * Provides offline-first caching strategy for browser-only operation
  */
 
-const CACHE_VERSION = 'hernai-v1.0.2';
+const CACHE_VERSION = 'hernai-v1.0.3';
 const CACHE_NAME = `hernai-ine-scanner-${CACHE_VERSION}`;
 
 // Static assets to cache on install
@@ -41,7 +41,8 @@ const EXTERNAL_LIBS = [
     'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js',
     'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js',
     'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.16.0/dist/ort.min.js',
-    'https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.12/dist/face-api.min.js'
+    'https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.12/dist/face-api.min.js',
+    'https://fonts.googleapis.com/icon?family=Material+Icons'
 ];
 
 // Dynamic content (models, templates) - cache as requested
@@ -304,7 +305,9 @@ function isExternalLib(url) {
     const cdnDomains = [
         'cdn.jsdelivr.net',
         'unpkg.com',
-        'cdnjs.cloudflare.com'
+        'cdnjs.cloudflare.com',
+        'fonts.googleapis.com',
+        'fonts.gstatic.com'
     ];
 
     return cdnDomains.some(domain => hostname.includes(domain));

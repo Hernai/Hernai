@@ -14,6 +14,9 @@
     <!-- Favicon -->
     <link rel="icon" type="image/png" href="assets/favicon.png">
 
+    <!-- Material Icons -->
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+
     <style>
         * {
             margin: 0;
@@ -123,6 +126,16 @@
         .drop-zone-icon {
             font-size: 3rem;
             margin-bottom: 10px;
+            color: #667eea;
+        }
+
+        .material-icons {
+            vertical-align: middle;
+            margin-right: 8px;
+        }
+
+        .btn .material-icons {
+            font-size: 20px;
         }
 
         .preview-image {
@@ -424,12 +437,12 @@
     <div class="container">
         <!-- Header -->
         <div class="header">
-            <h1>🪪 INE Scanner AI</h1>
+            <h1><i class="material-icons" style="font-size: 2.5rem; vertical-align: middle;">badge</i> INE Scanner AI</h1>
             <p>Browser-only Mexican voter ID scanner with AI-powered fraud detection</p>
             <div>
-                <span class="badge badge-browser">🌐 100% Browser</span>
-                <span class="badge badge-ai">🤖 AI-Powered</span>
-                <span class="badge badge-fraud">🛡️ Anti-Fraud</span>
+                <span class="badge badge-browser"><i class="material-icons" style="font-size: 16px;">language</i> 100% Browser</span>
+                <span class="badge badge-ai"><i class="material-icons" style="font-size: 16px;">smart_toy</i> AI-Powered</span>
+                <span class="badge badge-fraud"><i class="material-icons" style="font-size: 16px;">security</i> Anti-Fraud</span>
             </div>
         </div>
 
@@ -440,7 +453,7 @@
                 <button class="remove-image" id="removeFront">×</button>
                 <img class="preview-image" id="previewFront" alt="Anverso preview">
                 <div class="drop-zone-content">
-                    <div class="drop-zone-icon">📄</div>
+                    <i class="material-icons drop-zone-icon">credit_card</i>
                     <h3>Anverso (Frente)</h3>
                     <p>Arrastra o haz clic para subir</p>
                     <small style="color: #94a3b8;">Soporta: JPG, PNG, WEBP</small>
@@ -453,7 +466,7 @@
                 <button class="remove-image" id="removeBack">×</button>
                 <img class="preview-image" id="previewBack" alt="Reverso preview">
                 <div class="drop-zone-content">
-                    <div class="drop-zone-icon">📄</div>
+                    <i class="material-icons drop-zone-icon">badge</i>
                     <h3>Reverso (Atrás)</h3>
                     <p>Arrastra o haz clic para subir</p>
                     <small style="color: #94a3b8;">Soporta: JPG, PNG, WEBP</small>
@@ -466,13 +479,16 @@
         <div class="controls">
             <div class="button-group">
                 <button class="btn btn-primary" id="btnProcess" disabled>
-                    <span>🚀 Procesar INE</span>
+                    <i class="material-icons">play_arrow</i>
+                    <span>Procesar INE</span>
                 </button>
                 <button class="btn btn-primary" id="btnProcessFraud" disabled>
-                    <span>🛡️ Procesar + Anti-Fraude</span>
+                    <i class="material-icons">security</i>
+                    <span>Procesar + Anti-Fraude</span>
                 </button>
                 <button class="btn btn-secondary" id="btnDemo">
-                    <span>📋 Cargar Demo</span>
+                    <i class="material-icons">folder_open</i>
+                    <span>Cargar Demo</span>
                 </button>
             </div>
 
@@ -487,7 +503,7 @@
 
         <!-- Results -->
         <div class="results" id="results">
-            <h2>📊 Resultados del Escaneo</h2>
+            <h2><i class="material-icons" style="vertical-align: middle;">bar_chart</i> Resultados del Escaneo</h2>
 
             <!-- Summary Stats -->
             <div class="result-summary" id="resultSummary"></div>
@@ -513,7 +529,8 @@
             <div class="tab-content" id="tab-json">
                 <div style="margin-bottom: 15px;">
                     <button class="btn btn-success" id="btnDownload">
-                        <span>💾 Descargar JSON</span>
+                        <i class="material-icons">download</i>
+                        <span>Descargar JSON</span>
                     </button>
                 </div>
                 <div class="json-output" id="jsonOutput"></div>
