@@ -339,23 +339,33 @@ class ImageProcessor {
      * Enhance contrast and brightness
      */
     async enhanceContrast(canvas) {
-        console.log('[ImageProcessor] Enhancing contrast...');
+        console.log('[ImageProcessor] Enhancing contrast with aggressive CLAHE...');
 
         if (this.isOpenCVReady) {
             try {
                 const src = cv.imread(canvas);
-                const dst = new cv.Mat();
+                const gray = new cv.Mat();
+                const clahed = new cv.Mat();
+                const enhanced = new cv.Mat();
 
-                // Apply CLAHE (Contrast Limited Adaptive Histogram Equalization)
-                cv.cvtColor(src, dst, cv.COLOR_RGBA2GRAY);
-                const clahe = new cv.CLAHE(2.0, new cv.Size(8, 8));
-                clahe.apply(dst, dst);
+                // Convert to grayscale
+                cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+
+                // Apply CLAHE with AGGRESSIVE parameters for better character separation
+                // clipLimit 4.0 = más contraste, tileGridSize 4x4 = más local/preciso
+                const clahe = new cv.CLAHE(4.0, new cv.Size(4, 4));
+                clahe.apply(gray, clahed);
+
+                // Additional contrast stretching to maximize black/white separation
+                cv.normalize(clahed, enhanced, 0, 255, cv.NORM_MINMAX);
 
                 const outputCanvas = document.createElement('canvas');
-                cv.imshow(outputCanvas, dst);
+                cv.imshow(outputCanvas, enhanced);
 
                 src.delete();
-                dst.delete();
+                gray.delete();
+                clahed.delete();
+                enhanced.delete();
 
                 return outputCanvas;
             } catch (error) {
@@ -363,13 +373,13 @@ class ImageProcessor {
             }
         }
 
-        // Fallback: Canvas-based contrast enhancement
+        // Fallback: Canvas-based contrast enhancement with stronger parameters
         const ctx = canvas.getContext('2d');
         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
         const data = imageData.data;
 
-        // Simple contrast enhancement
-        const factor = 1.2; // Contrast factor
+        // Aggressive contrast enhancement
+        const factor = 1.5; // Increased contrast factor
         const intercept = 128 * (1 - factor);
 
         for (let i = 0; i < data.length; i += 4) {
@@ -449,10 +459,10 @@ class ImageProcessor {
     }
 
     /**
-     * Advanced binarization with morphological operations
+     * Advanced binarization optimized to prevent character merging
      */
     async binarize(canvas) {
-        console.log('[ImageProcessor] Binarizing with advanced techniques...');
+        console.log('[ImageProcessor] Binarizing with OCR-optimized parameters...');
 
         if (this.isOpenCVReady) {
             try {
@@ -464,21 +474,21 @@ class ImageProcessor {
                 // Convert to grayscale
                 cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
 
-                // Apply adaptive thresholding with optimized parameters for text
+                // Apply adaptive thresholding with parameters optimized to SEPARATE characters
+                // Larger block size and higher C value to prevent character merging
                 cv.adaptiveThreshold(
                     gray, binary, 255,
                     cv.ADAPTIVE_THRESH_GAUSSIAN_C,
-                    cv.THRESH_BINARY, 15, 3  // Larger block size for better text
+                    cv.THRESH_BINARY, 21, 7  // Increased block size and C to separate better
                 );
 
-                // Morphological operations to clean up and connect broken text
-                const kernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(2, 2));
+                // Use EROSION to slightly separate touching characters
+                const erodeKernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(1, 1));
+                cv.erode(binary, morphed, erodeKernel, new cv.Point(-1, -1), 1);
 
-                // Remove small noise
-                cv.morphologyEx(binary, morphed, cv.MORPH_OPEN, kernel);
-
-                // Close small gaps in text
-                cv.morphologyEx(morphed, morphed, cv.MORPH_CLOSE, kernel);
+                // Remove tiny noise with small opening
+                const noiseKernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(2, 2));
+                cv.morphologyEx(morphed, morphed, cv.MORPH_OPEN, noiseKernel);
 
                 const outputCanvas = document.createElement('canvas');
                 cv.imshow(outputCanvas, morphed);
@@ -487,7 +497,8 @@ class ImageProcessor {
                 gray.delete();
                 binary.delete();
                 morphed.delete();
-                kernel.delete();
+                erodeKernel.delete();
+                noiseKernel.delete();
 
                 return outputCanvas;
             } catch (error) {

@@ -37,12 +37,12 @@ class INEDetector {
                     'REGISTRO'
                 ]
             },
-            // Umbrales de confianza (ajustados para ser más permisivos)
+            // Umbrales de confianza (ajustados para detectar INEs reales)
             thresholds: {
-                minimumConfidence: 45,  // Reducido de 70 a 45 para ser más permisivo
-                patternMatchWeight: 0.35,  // Reducido ligeramente
-                keywordMatchWeight: 0.25,  // Reducido ligeramente
-                visualFeaturesWeight: 0.40  // Aumentado para dar más peso a características visuales
+                minimumConfidence: 35,  // Reducido a 35 para ser más sensible
+                patternMatchWeight: 0.45,  // Mayor peso a patrones (CURP, OCR, etc.)
+                keywordMatchWeight: 0.30,  // Mayor peso a keywords importantes
+                visualFeaturesWeight: 0.25  // Menor peso a características visuales
             },
             // Características visuales de INE
             visualFeatures: {
@@ -255,20 +255,34 @@ class INEDetector {
         let totalMatches = 0;
         let confidence = 0;
 
-        // Check each pattern
+        // Check each pattern with AGGRESSIVE weighting for important fields
         for (const [key, pattern] of Object.entries(this.compiledPatterns)) {
             const found = normalizedText.match(pattern);
             if (found) {
                 matches[key] = found;
                 totalMatches++;
 
-                // Weight important patterns more
-                if (key === 'CURP' || key === 'CLAVE_ELECTOR' || key === 'OCR') {
-                    confidence += 30;
+                // Weight critical INE patterns VERY heavily
+                if (key === 'CURP') {
+                    confidence += 45;  // CURP es el más importante
+                } else if (key === 'CLAVE_ELECTOR') {
+                    confidence += 40;  // Clave elector casi igual de importante
+                } else if (key === 'OCR') {
+                    confidence += 35;  // OCR code muy importante
+                } else if (key === 'CIC') {
+                    confidence += 25;  // CIC para modelos viejos
+                } else if (key === 'ANIO') {
+                    confidence += 15;  // Años ayudan pero menos
                 } else {
-                    confidence += 10;
+                    confidence += 10;  // Otros patrones
                 }
             }
+        }
+
+        // Boost adicional si tiene múltiples patrones clave
+        const criticalPatterns = ['CURP', 'CLAVE_ELECTOR', 'OCR'].filter(k => matches[k]);
+        if (criticalPatterns.length >= 2) {
+            confidence += 20;  // Bonus por tener 2+ campos críticos
         }
 
         // Normalize confidence to 0-100
@@ -283,21 +297,41 @@ class INEDetector {
     }
 
     /**
-     * Analyze keyword presence
+     * Analyze keyword presence with smart matching
      */
     analyzeKeywords(ocrText) {
-        console.log('[INE-Detector] Analyzing keywords...');
+        console.log('[INE-Detector] Analyzing keywords with AI matching...');
 
         const normalizedText = this.normalizeText(ocrText);
         const matches = [];
+        let score = 0;
         let requiredCount = 0;
         let optionalCount = 0;
 
-        // Check required keywords
+        // Check for critical keyword combinations (muy importante)
+        if (normalizedText.includes('INE') || normalizedText.includes('INSTITUTO NACIONAL ELECTORAL')) {
+            score += 40;  // INE keyword es crítico
+            matches.push({ keyword: 'INE/INSTITUTO', type: 'critical' });
+        }
+
+        // Check for "MEXICO" (casi todas las INEs lo tienen)
+        if (normalizedText.includes('MEXICO') || normalizedText.includes('MÉXICO')) {
+            score += 30;
+            matches.push({ keyword: 'MEXICO', type: 'critical' });
+        }
+
+        // Check for "CREDENCIAL" or "ELECTORAL" or "ELECTOR"
+        if (normalizedText.includes('CREDENCIAL') || normalizedText.includes('ELECTORAL') || normalizedText.includes('ELECTOR')) {
+            score += 25;
+            matches.push({ keyword: 'CREDENCIAL/ELECTORAL', type: 'required' });
+        }
+
+        // Check required keywords (flexible matching)
         for (const keyword of this.config.keywords.required) {
             if (normalizedText.includes(keyword)) {
                 matches.push({ keyword, type: 'required' });
                 requiredCount++;
+                score += 5;  // Bonus adicional por cada keyword
             }
         }
 
@@ -306,13 +340,12 @@ class INEDetector {
             if (normalizedText.includes(keyword)) {
                 matches.push({ keyword, type: 'optional' });
                 optionalCount++;
+                score += 3;  // Bonus menor por keywords opcionales
             }
         }
 
-        // Calculate score
-        const requiredPercentage = (requiredCount / this.config.keywords.required.length) * 100;
-        const optionalPercentage = (optionalCount / this.config.keywords.optional.length) * 100;
-        const score = (requiredPercentage * 0.7) + (optionalPercentage * 0.3);
+        // Normalize score to 0-100
+        score = Math.min(100, score);
 
         return {
             matches,
