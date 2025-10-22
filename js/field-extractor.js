@@ -5,6 +5,9 @@
 
 class FieldExtractor {
     constructor() {
+        // Initialize intelligent OCR corrector (NO hardcoded replace)
+        this.ocrCorrector = new OCRCorrector();
+
         // Patrones regex para cada campo (más tolerantes)
         this.patterns = {
             CURP: {
@@ -82,53 +85,16 @@ class FieldExtractor {
     }
 
     /**
-     * Normalize OCR text - fix common OCR errors
+     * Normalize OCR text using intelligent AI correction
+     * NO hardcoded replace - uses OCRCorrector with context analysis
      */
     normalizeOCRText(text) {
         if (!text) return '';
 
-        let normalized = text;
+        // Use intelligent OCR corrector instead of hardcoded replace
+        const normalized = this.ocrCorrector.correctText(text, { type: 'general' });
 
-        // Fix common OCR mistakes
-        const corrections = {
-            // Numbers that look like letters
-            'O': '0',  // O → 0 in numeric contexts
-            'I': '1',  // I → 1 in numeric contexts
-            'l': '1',  // lowercase L → 1
-            'S': '5',  // S → 5 in some fonts
-            'B': '8',  // B → 8 in some cases
-            // Special characters
-            '|': 'I',  // pipe → I
-            '¡': 'I',
-            '°': '0',
-            'º': '0'
-        };
-
-        // Apply corrections in numeric-heavy regions (CURP, Clave Elector, etc.)
-        normalized = normalized.replace(/[A-Z]{4}[O|Il]{6}[HM][A-Z]{5}[A-Z0-9][O|Il]/g, (match) => {
-            return match.replace(/O/g, '0').replace(/I/g, '1').replace(/l/g, '1');
-        });
-
-        // Fix common mistakes in Clave de Elector
-        normalized = normalized.replace(/[A-Z]{6}[O|Il]{8}[HM][O|Il]{3}/g, (match) => {
-            return match.replace(/O/g, '0').replace(/I/g, '1').replace(/l/g, '1');
-        });
-
-        // Remove extra spaces
-        normalized = normalized.replace(/\s+/g, ' ');
-
-        // Fix common word breaks
-        normalized = normalized.replace(/C\s*L\s*A\s*V\s*E/gi, 'CLAVE');
-        normalized = normalized.replace(/C\s*U\s*R\s*P/gi, 'CURP');
-        normalized = normalized.replace(/E\s*L\s*E\s*C\s*T\s*O\s*R/gi, 'ELECTOR');
-        normalized = normalized.replace(/V\s*I\s*G\s*E\s*N\s*C\s*I\s*A/gi, 'VIGENCIA');
-        normalized = normalized.replace(/E\s*M\s*I\s*S\s*I\s*O\s*N/gi, 'EMISION');
-        normalized = normalized.replace(/S\s*E\s*C\s*C\s*I\s*O\s*N/gi, 'SECCION');
-
-        // Normalize whitespace
-        normalized = normalized.trim();
-
-        console.log('[FieldExtractor] Text normalized');
+        console.log('[FieldExtractor] Text normalized with AI correction');
         return normalized;
     }
 
@@ -747,31 +713,17 @@ class FieldExtractor {
      * Handles OCR errors like EIVER → IVER
      */
     parseNameFromBarcode(barcode) {
-        // Format examples:
-        // "GONZALEZCVIDALCIVERCFABIAN" → GONZALEZ VIDAL IVER FABIAN
+        // Use intelligent OCR corrector to parse barcode with AI
+        // NO hardcoded replace or splits
+        const parsed = this.ocrCorrector.parseNameFromBarcode(barcode);
 
-        console.log('[FieldExtractor] Parsing barcode:', barcode);
-
-        // Pattern: APELLIDO1 C APELLIDO2 C NOMBRE(S)
-        // Split by 'C' to separate components
-        const parts = barcode.split('C').filter(p => p && p.length > 1);
-
-        if (parts.length >= 3) {
-            const apellidoPaterno = parts[0];
-            const apellidoMaterno = parts[1];
-            // Join remaining parts as nombres (sin fix de EIVER porque IVER es correcto)
-            let nombres = parts.slice(2).join(' ').trim();
-
-            // Construir nombre completo: APELLIDO_PATERNO APELLIDO_MATERNO NOMBRE(S)
-            const fullName = [apellidoPaterno, apellidoMaterno, nombres]
-                .filter(p => p)
-                .join(' ');
-
-            console.log('[FieldExtractor] Name from barcode:', fullName);
-            return fullName;
+        if (parsed) {
+            console.log('[FieldExtractor] Name from barcode (AI):', parsed.fullName);
+            return parsed.fullName;
         }
 
-        // Fallback: try to split by common patterns
+        // Fallback: couldn't parse
+        console.warn('[FieldExtractor] Could not parse barcode with AI:', barcode);
         return '';
     }
 

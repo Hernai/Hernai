@@ -179,6 +179,38 @@ class HernAI {
             console.log('[HernAI] Final detection - Front:', detectionFront.confidence + '%', detectionFront.side);
             console.log('[HernAI] Final detection - Back:', detectionBack.confidence + '%', detectionBack.side);
 
+            // CRITICAL VALIDATION: Verify that front and back are DIFFERENT sides
+            if (detectionFront.side === detectionBack.side && detectionFront.side !== 'unknown') {
+                throw new Error(
+                    `¡ERROR! Subiste el MISMO lado 2 veces. ` +
+                    `Ambas imágenes son "${detectionFront.side === 'front' ? 'ANVERSO' : 'REVERSO'}". ` +
+                    `Debes subir una imagen del ANVERSO y otra del REVERSO.`
+                );
+            }
+
+            // Validate we have both sides detected
+            if (detectionFront.side === 'unknown' || detectionBack.side === 'unknown') {
+                const unknownSide = detectionFront.side === 'unknown' ? 'primera' : 'segunda';
+                throw new Error(
+                    `No se pudo determinar si la ${unknownSide} imagen es anverso o reverso. ` +
+                    `Asegúrate de subir fotos claras y completas de ambos lados de tu INE.`
+                );
+            }
+
+            // Validate we have one front and one back
+            const hasFront = detectionFront.side === 'front' || detectionBack.side === 'front';
+            const hasBack = detectionFront.side === 'back' || detectionBack.side === 'back';
+
+            if (!hasFront || !hasBack) {
+                throw new Error(
+                    `Faltan lados de la credencial INE. ` +
+                    `Detectado: imagen 1="${detectionFront.side}", imagen 2="${detectionBack.side}". ` +
+                    `Necesitas subir UNA imagen del ANVERSO y UNA del REVERSO.`
+                );
+            }
+
+            console.log('[HernAI] ✅ Validation passed: Front and back are different sides');
+
             // STEP 6: Extract fields using improved extraction with layout analysis
             if (onProgress) onProgress({ stage: 'extraction', progress: 85, message: 'Extrayendo campos con IA...' });
 
