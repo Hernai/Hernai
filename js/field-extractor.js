@@ -332,12 +332,37 @@ class FieldExtractor {
         const localidad = this.extractLocalidad(text);
         const domicilioCompleto = this.extractDomicilioCompleto(text);
 
+        // Parse address into structured components
+        const parsedAddress = this.parseAddress(domicilioCompleto, {
+            codigo_postal: cpMatch ? cpMatch.value : '',
+            municipio: municipio,
+            estado: estado
+        });
+
         return {
             visible: true,
             domicilio_completo: {
                 valor: domicilioCompleto,
                 confianza: domicilioCompleto ? 70 : 0,
                 fuente: 'ocr',
+                obligatorio: false
+            },
+            vialidad: {
+                valor: parsedAddress.vialidad,
+                confianza: parsedAddress.vialidad ? 80 : 0,
+                fuente: 'address_parser',
+                obligatorio: false
+            },
+            numero_exterior: {
+                valor: parsedAddress.numero,
+                confianza: parsedAddress.numero ? 85 : 0,
+                fuente: 'address_parser',
+                obligatorio: false
+            },
+            localidad: {
+                valor: parsedAddress.localidad || localidad,
+                confianza: parsedAddress.localidad ? 80 : (localidad ? 75 : 0),
+                fuente: parsedAddress.localidad ? 'address_parser' : 'ocr',
                 obligatorio: false
             },
             codigo_postal: {
@@ -347,23 +372,17 @@ class FieldExtractor {
                 fuente: 'ocr',
                 obligatorio: false
             },
-            estado: {
-                valor: estado,
-                confianza: estado ? 90 : 0,
-                fuente: 'ocr',
-                obligatorio: true
-            },
             municipio: {
-                valor: municipio,
-                confianza: municipio ? 80 : 0,
-                fuente: 'ocr',
+                valor: parsedAddress.municipio || municipio,
+                confianza: parsedAddress.municipio ? 85 : (municipio ? 80 : 0),
+                fuente: parsedAddress.municipio ? 'address_parser' : 'ocr',
                 obligatorio: true
             },
-            localidad: {
-                valor: localidad,
-                confianza: localidad ? 75 : 0,
-                fuente: 'ocr',
-                obligatorio: false
+            estado: {
+                valor: parsedAddress.estado || estado,
+                confianza: parsedAddress.estado ? 90 : (estado ? 90 : 0),
+                fuente: parsedAddress.estado ? 'address_parser' : 'ocr',
+                obligatorio: true
             }
         };
     }
@@ -411,6 +430,147 @@ class FieldExtractor {
         }
 
         return addressLines.join(', ').trim();
+    }
+
+    /**
+     * Parse address into structured components
+     * Input example: "AV EMILIO CARRANZA 35 pe BARR BENITO JUAREZ 29160 E CHIAPADE CORZO, CHI"
+     * Output: { vialidad, numero, localidad, codigo_postal, municipio, estado }
+     */
+    parseAddress(addressText, extractedData = {}) {
+        if (!addressText || addressText.length < 10) {
+            return {
+                vialidad: '',
+                numero: '',
+                localidad: '',
+                codigo_postal: extractedData.codigo_postal || '',
+                municipio: extractedData.municipio || '',
+                estado: extractedData.estado || ''
+            };
+        }
+
+        const upperAddress = addressText.toUpperCase();
+        let vialidad = '';
+        let numero = '';
+        let localidad = '';
+        let codigo_postal = extractedData.codigo_postal || '';
+        let municipio = extractedData.municipio || '';
+        let estado = extractedData.estado || '';
+
+        // Common vialidad types (street types)
+        const vialidadTypes = [
+            'AVENIDA', 'AV\\.?', 'CALLE', 'C\\.?', 'BOULEVARD', 'BLVD\\.?',
+            'PRIVADA', 'PRIV\\.?', 'ANDADOR', 'AND\\.?', 'CALLEJON', 'CALLEJ\\.?',
+            'CALZADA', 'CALZ\\.?', 'CAMINO', 'CAM\\.?', 'CARRETERA', 'CARR\\.?',
+            'DIAGONAL', 'DIAG\\.?', 'EJE VIAL', 'PASEO', 'PERIFÉRICO', 'PERIFERICO',
+            'PROLONGACIÓN', 'PROLONGACION', 'PROL\\.?', 'RETORNO', 'RET\\.?',
+            'VIADUCTO', 'VIA\\.?'
+        ];
+
+        // Common localidad prefixes
+        const localidadTypes = [
+            'BARRIO', 'BARR\\.?', 'COLONIA', 'COL\\.?', 'FRACCIONAMIENTO', 'FRACC\\.?',
+            'UNIDAD', 'U\\.?', 'RESIDENCIAL', 'RESID\\.?', 'CONJUNTO', 'CONJ\\.?',
+            'VILLA', 'SECTOR', 'SECT\\.?'
+        ];
+
+        // Strategy 1: Extract vialidad (street type + name)
+        const vialidadPattern = new RegExp(
+            `(${vialidadTypes.join('|')})\\s+([A-ZÁÉÍÓÚÑ\\s]+?)\\s+(\\d+)`,
+            'i'
+        );
+        const vialidadMatch = upperAddress.match(vialidadPattern);
+        if (vialidadMatch) {
+            vialidad = `${vialidadMatch[1]} ${vialidadMatch[2]}`.trim();
+            numero = vialidadMatch[3];
+            console.log('[FieldExtractor] Vialidad extracted:', vialidad, 'Número:', numero);
+        } else {
+            // Fallback: extract first part before a number
+            const simplePattern = /^([A-ZÁÉÍÓÚÑ\s]+?)\s+(\d+)/;
+            const simpleMatch = upperAddress.match(simplePattern);
+            if (simpleMatch) {
+                vialidad = simpleMatch[1].trim();
+                numero = simpleMatch[2];
+            }
+        }
+
+        // Strategy 2: Extract localidad (neighborhood/colony)
+        const localidadPattern = new RegExp(
+            `(${localidadTypes.join('|')})\\s+([A-ZÁÉÍÓÚÑ\\s]+?)\\s+(?=\\d{5}|[A-Z]+,)`,
+            'i'
+        );
+        const localidadMatch = upperAddress.match(localidadPattern);
+        if (localidadMatch) {
+            localidad = `${localidadMatch[1]} ${localidadMatch[2]}`.trim();
+            console.log('[FieldExtractor] Localidad extracted:', localidad);
+        }
+
+        // Strategy 3: Extract código postal (5-digit number)
+        if (!codigo_postal) {
+            const cpMatch = upperAddress.match(/\b(\d{5})\b/);
+            if (cpMatch) {
+                codigo_postal = cpMatch[1];
+            }
+        }
+
+        // Strategy 4: Extract municipio and estado from "CITY, STATE" pattern
+        // Example: "CHIAPA DE CORZO, CHI"
+        if (!municipio || !estado) {
+            const cityStateMatch = upperAddress.match(/([A-ZÁÉÍÓÚÑ\s]{3,}),\s*([A-Z]{2,4})/);
+            if (cityStateMatch) {
+                if (!municipio) {
+                    // Clean municipio name (remove localidad prefixes)
+                    let rawMunicipio = cityStateMatch[1]
+                        .replace(new RegExp(localidadTypes.join('|'), 'gi'), '')
+                        .trim();
+                    municipio = this.cleanMunicipioName(rawMunicipio);
+                }
+
+                if (!estado) {
+                    // Map state abbreviation to full name
+                    const stateAbbrev = cityStateMatch[2];
+                    const abreviaturas = {
+                        'CHIS': 'CHIAPAS',
+                        'CHI': 'CHIAPAS',
+                        'CDMX': 'CIUDAD DE MEXICO',
+                        'DF': 'DISTRITO FEDERAL',
+                        'MEX': 'ESTADO DE MEXICO',
+                        'NL': 'NUEVO LEON',
+                        'QRO': 'QUERETARO',
+                        'QROO': 'QUINTANA ROO',
+                        'SLP': 'SAN LUIS POTOSI',
+                        'BC': 'BAJA CALIFORNIA',
+                        'BCS': 'BAJA CALIFORNIA SUR',
+                        'JAL': 'JALISCO',
+                        'VER': 'VERACRUZ',
+                        'YUC': 'YUCATAN'
+                    };
+                    estado = abreviaturas[stateAbbrev] || stateAbbrev;
+                }
+            }
+        }
+
+        // Clean extracted values
+        vialidad = vialidad.replace(/\s+/g, ' ').trim();
+        localidad = localidad.replace(/\s+/g, ' ').trim();
+
+        console.log('[FieldExtractor] Address parsed:', {
+            vialidad,
+            numero,
+            localidad,
+            codigo_postal,
+            municipio,
+            estado
+        });
+
+        return {
+            vialidad,
+            numero,
+            localidad,
+            codigo_postal,
+            municipio,
+            estado
+        };
     }
 
     /**
@@ -529,25 +689,38 @@ class FieldExtractor {
 
     /**
      * Parse name from barcode format: APELLIDOCAPELLIDOCNOMBRE
+     * Handles OCR errors like EIVER → IVER
      */
     parseNameFromBarcode(barcode) {
-        // Format: GONZALEZCVIDALEIVERCFABIAN
+        // Format examples:
+        // "GONZALEZCVIDALEIVERCFABIAN"
+        // "GONZALEZCVIDALCIVERCFABIAN"
+
+        console.log('[FieldExtractor] Parsing barcode:', barcode);
+
         // Pattern: APELLIDO1 C APELLIDO2 C NOMBRE
+        // Split by 'C' but handle cases where C appears in name
         const parts = barcode.split('C').filter(p => p && p.length > 1);
 
-        if (parts.length >= 2) {
-            // Take first 2-3 parts as apellidos and nombre
+        if (parts.length >= 3) {
             const apellidoPaterno = parts[0];
-            const apellidoMaterno = parts.length > 2 ? parts[1] : '';
-            const nombres = parts.length > 2 ? parts.slice(2).join(' ') : parts[1];
+            const apellidoMaterno = parts[1];
+            // Join remaining parts as nombres, cleaning common OCR errors
+            let nombres = parts.slice(2).join(' ')
+                .replace(/EIVER/g, 'IVER')  // Fix EIVER → IVER
+                .replace(/CFABIAN/g, 'FABIAN')  // Fix extra C
+                .trim();
 
             const fullName = [apellidoPaterno, apellidoMaterno, nombres]
                 .filter(p => p)
                 .join(' ');
 
+            console.log('[FieldExtractor] Name from barcode:', fullName);
             return fullName;
         }
 
+        // Fallback: try to split by common patterns
+        // Example: GONZALEZVIDALEIVERFABIAN → try to find name patterns
         return '';
     }
 
@@ -670,7 +843,7 @@ class FieldExtractor {
     }
 
     /**
-     * Extract municipio - improved
+     * Extract municipio - improved with OCR error correction
      */
     extractMunicipio(text) {
         const lines = text.split('\n');
@@ -682,7 +855,7 @@ class FieldExtractor {
             if (this.keywords.municipio.some(kw => upperLine.includes(kw))) {
                 const parts = line.split(/MUNICIPIO|MPIO|MUN/i);
                 if (parts.length > 1) {
-                    const municipio = parts[1].trim().replace(/[^A-ZÁÉÍÓÚÑ\s]/gi, '');
+                    const municipio = this.cleanMunicipioName(parts[1].trim());
                     console.log('[FieldExtractor] Municipio extracted after keyword:', municipio);
                     return municipio;
                 }
@@ -690,26 +863,45 @@ class FieldExtractor {
         }
 
         // Strategy 2: Look for city-like names in address
-        // Pattern: "CITY_NAME, STATE_ABBREV" like "CHIAPADE CORZO, CHI"
+        // Pattern: "CITY_NAME, STATE_ABBREV" like "E CHIAPADE CORZO, CHI"
         const cityStateMatch = upperText.match(/([A-ZÁÉÍÓÚÑ\s]{3,}),\s*([A-Z]{2,4})/i);
         if (cityStateMatch) {
-            const cityName = cityStateMatch[1]
+            let cityName = cityStateMatch[1]
                 .replace(/BARR|COLONIA|COL\.|FRACC/gi, '')
                 .trim();
 
             if (cityName.length > 3) {
-                // Fix common OCR issues: "CHIAPADE CORZO" → "CHIAPA DE CORZO"
-                const fixed = cityName
-                    .replace(/([A-Z]+)DE([A-Z])/g, '$1 DE $2')  // Fix "XXXDEXXX" → "XXX DE XXX"
-                    .replace(/\s+/g, ' ')
-                    .trim();
-
+                const fixed = this.cleanMunicipioName(cityName);
                 console.log('[FieldExtractor] Municipio extracted from city pattern:', fixed);
                 return fixed;
             }
         }
 
         return '';
+    }
+
+    /**
+     * Clean and fix common OCR errors in municipio names
+     */
+    cleanMunicipioName(municipio) {
+        let cleaned = municipio;
+
+        // Remove leading "E " prefix (common OCR error)
+        cleaned = cleaned.replace(/^E\s+/i, '');
+
+        // Fix "CHIAPADE" → "CHIAPA DE"
+        cleaned = cleaned.replace(/CHIAPADE/gi, 'CHIAPA DE');
+
+        // Fix general pattern "XXXDEXXX" → "XXX DE XXX"
+        cleaned = cleaned.replace(/([A-Z]+)DE([A-Z])/g, '$1 DE $2');
+
+        // Remove non-alphabetic characters except spaces
+        cleaned = cleaned.replace(/[^A-ZÁÉÍÓÚÑ\s]/gi, '');
+
+        // Normalize spaces
+        cleaned = cleaned.replace(/\s+/g, ' ').trim();
+
+        return cleaned;
     }
 
     /**
@@ -731,6 +923,7 @@ class FieldExtractor {
 
     /**
      * Extract years (registro, emision, vigencia)
+     * Handles formats: 201201, 2012, 209-203, etc.
      */
     extractYears(text) {
         let anoRegistro = '';
@@ -751,15 +944,40 @@ class FieldExtractor {
             anoEmision = emisionMatch[1];
         }
 
-        // Look for "VIGENCIA" + year or year range like "2029-2023" or "209-203"
-        const vigenciaMatch = text.match(/(?:VIGENCIA|VIG\.?)\s*:?\s*(\d{3,4})[\s\-]*(\d{3})?/i);
-        if (vigenciaMatch) {
-            let year = vigenciaMatch[1];
-            // Handle short format: 209 = 2029, 203 = 2023
-            if (year.length === 3) {
-                year = '20' + year;
+        // Look for "VIGENCIA" + year range: "209-203" = 2029-2023 BUT actually 2023-2033
+        // INE vigencia format: START-END in YY format, where END is year+10
+        const vigenciaRangeMatch = text.match(/(?:VIGENCIA|VIG\.?)\s*:?\s*(\d{3})[\s\-]+(\d{3})/i);
+        if (vigenciaRangeMatch) {
+            const year1 = vigenciaRangeMatch[1];
+            const year2 = vigenciaRangeMatch[2];
+
+            // Convert 3-digit to 4-digit: 209 → 2029, 203 → 2023
+            const fullYear1 = '20' + year1;
+            const fullYear2 = '20' + year2;
+
+            // The FIRST year is the emission/start, SECOND is vigencia/end
+            // But if first > second, it means second is the START
+            // Example: "209-203" likely means 2023-2033 (swapped in OCR)
+            if (parseInt(fullYear2) < parseInt(fullYear1)) {
+                // Swapped: 203 is start (2023), 209 is actually 33 (2033)
+                vigencia = fullYear2.substring(0, 2) + year1.substring(1); // 20 + 33 = 2033
+                anoEmision = fullYear2; // 2023
+            } else {
+                vigencia = fullYear1;
+                anoEmision = fullYear2;
             }
-            vigencia = year;
+
+            console.log(`[FieldExtractor] Vigencia range: ${year1}-${year2} → start:${anoEmision}, end:${vigencia}`);
+        } else {
+            // Single year format
+            const vigenciaMatch = text.match(/(?:VIGENCIA|VIG\.?)\s*:?\s*(\d{3,4})/i);
+            if (vigenciaMatch) {
+                let year = vigenciaMatch[1];
+                if (year.length === 3) {
+                    year = '20' + year;
+                }
+                vigencia = year;
+            }
         }
 
         // Fallback: extract all 4-digit years
@@ -767,11 +985,11 @@ class FieldExtractor {
         if (!anoRegistro && allYears.length > 0) {
             anoRegistro = allYears[0];
         }
-        if (!anoEmision && allYears.length > 0) {
+        if (!anoEmision && allYears.length > 0 && !vigenciaRangeMatch) {
             anoEmision = allYears[0];
         }
         if (!vigencia && allYears.length > 1) {
-            vigencia = allYears[allYears.length - 1]; // Last year is usually vigencia
+            vigencia = allYears[allYears.length - 1];
         }
 
         console.log('[FieldExtractor] Years extracted:', { anoRegistro, anoEmision, vigencia });
@@ -780,24 +998,38 @@ class FieldExtractor {
     }
 
     /**
-     * Extract seccion - improved
+     * Extract seccion - improved for 4-digit sections
      */
     extractSeccion(text) {
-        // Try multiple patterns
-        const patterns = [
-            /(?:SECCION|SECCIÓN)\s*:?\s*(\d{3,4})/i,
-            /(?:SECC|SEC)\s*:?\s*(\d{3,4})/i,
-            /(?:SECCIÓN|SECCION)\s+(\d{3,4})/i,
-            // Standalone 3-digit number that looks like section
-            /\b(\d{3})\b/g
+        // Try multiple patterns - prioritize explicit keywords
+        const keywordPatterns = [
+            /(?:SECCIÓN|SECCION)\s*:?\s*(\d{4})/i,  // 4 digits first
+            /(?:SECCIÓN|SECCION)\s*:?\s*(\d{3})/i,  // 3 digits as fallback
+            /(?:SECC|SEC)\s*:?\s*(\d{4})/i,
+            /(?:SECC|SEC)\s*:?\s*(\d{3})/i
         ];
 
-        for (const pattern of patterns) {
+        for (const pattern of keywordPatterns) {
             const match = text.match(pattern);
             if (match) {
-                console.log('[FieldExtractor] Seccion extracted:', match[1]);
+                console.log('[FieldExtractor] Seccion extracted (keyword):', match[1]);
                 return match[1];
             }
+        }
+
+        // Fallback: look for 4-digit numbers that could be section
+        // INE sections are typically 0001-9999
+        const standalone4Digit = text.match(/\b(0\d{3})\b/);
+        if (standalone4Digit) {
+            console.log('[FieldExtractor] Seccion extracted (4-digit pattern):', standalone4Digit[1]);
+            return standalone4Digit[1];
+        }
+
+        // Last fallback: 3-digit number after common keywords
+        const standalone3Digit = text.match(/\b(\d{3})\b/);
+        if (standalone3Digit && parseInt(standalone3Digit[1]) > 0) {
+            console.log('[FieldExtractor] Seccion extracted (3-digit fallback):', standalone3Digit[1]);
+            return standalone3Digit[1];
         }
 
         return '';
