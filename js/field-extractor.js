@@ -1241,9 +1241,35 @@ class FieldExtractor {
             const fieldType = this.getFieldType(fieldKey);
 
             // 4. Run OCR with field-specific whitelist and PSM
+            // PSM modes: 3=auto, 6=block, 7=single line, 8=single word, 13=raw line
             let psm = 7; // Single line default
-            if (fieldKey === 'nombre' || fieldKey === 'domicilio') {
+            let whitelist = '';
+
+            // Configuración ESPECÍFICA por tipo de campo (más restrictiva)
+            if (fieldKey === 'nombre') {
+                psm = 6; // Block of text (puede tener múltiples líneas)
+                whitelist = 'ABCDEFGHIJKLMNOPQRSTUVWXYZÁÉÍÓÚÑ ';
+            } else if (fieldKey === 'domicilio') {
                 psm = 6; // Block of text
+                whitelist = 'ABCDEFGHIJKLMNOPQRSTUVWXYZÁÉÍÓÚÑ0123456789 .,-#';
+            } else if (fieldKey === 'curp') {
+                psm = 7; // Single line - CRÍTICO: solo una línea
+                whitelist = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+            } else if (fieldKey === 'clave_elector') {
+                psm = 7; // Single line
+                whitelist = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+            } else if (fieldKey === 'sexo') {
+                psm = 8; // Single word - MUY RESTRICTIVO
+                whitelist = 'HM';
+            } else if (fieldKey === 'seccion') {
+                psm = 7; // Single line
+                whitelist = '0123456789';
+            } else if (fieldKey === 'anio_registro' || fieldKey === 'vigencia' || fieldKey === 'fecha_nacimiento') {
+                psm = 7; // Single line
+                whitelist = '0123456789/-';
+            } else if (fieldKey === 'ocr_code') {
+                psm = 7; // Single line
+                whitelist = '0123456789';
             } else if (fieldKey === 'mrz') {
                 // Use OCRB for MRZ
                 const mrzResult = await ocr.recognizeOCRB(croppedCanvas);
@@ -1257,9 +1283,11 @@ class FieldExtractor {
                 };
             }
 
+            // Usar whitelist específico si se definió, sino usar el de fieldType
             const result = await ocr.recognizeWithWhitelist(croppedCanvas, {
-                fieldType: fieldType,
-                psm: psm
+                fieldType: whitelist ? null : fieldType,
+                psm: psm,
+                whitelist: whitelist || undefined
             });
 
             // 5. Normalize and correct using OCRCorrector
