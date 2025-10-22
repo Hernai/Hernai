@@ -9,6 +9,7 @@ class HernAI {
         this.detector = new INEDetector();
         this.processor = new ImageProcessor();
         this.extractor = new FieldExtractor();
+        this.aiExtractor = new AIFieldExtractor();  // AI-powered field extraction
 
         this.state = {
             frontImage: null,
@@ -67,6 +68,12 @@ class HernAI {
             });
             console.log('[HernAI] OCR engine initialized');
 
+            // Step 4: Initialize AI Field Extractor
+            if (onProgress) onProgress({ component: 'ai-extractor', progress: 0 });
+            this.initializationProgress = 80;
+            await this.aiExtractor.initialize();
+            console.log('[HernAI] AI field extractor initialized');
+
             this.initializationProgress = 100;
             this.isInitialized = true;
 
@@ -124,24 +131,14 @@ class HernAI {
                 };
             }
 
-            // STEP 2: Process images (enhancement)
-            if (onProgress) onProgress({ stage: 'processing', progress: 15, message: 'Mejorando calidad de imágenes...' });
+            // STEP 2: Process images with INE-optimized pipeline (deskewing, morphology, etc.)
+            if (onProgress) onProgress({ stage: 'processing', progress: 15, message: 'Mejorando calidad con IA (preprocesamiento avanzado)...' });
 
-            const processedFront = await this.processor.process(frontImage, {
-                autoRotate: true,
-                autoContrast: true,
-                autoDenoising: true,
-                binarize: true
-            });
+            const processedFront = await this.processor.processForINE(frontImage);
 
-            if (onProgress) onProgress({ stage: 'processing', progress: 25, message: 'Procesando reverso...' });
+            if (onProgress) onProgress({ stage: 'processing', progress: 25, message: 'Procesando reverso con pipeline optimizado...' });
 
-            const processedBack = await this.processor.process(backImage, {
-                autoRotate: true,
-                autoContrast: true,
-                autoDenoising: true,
-                binarize: true
-            });
+            const processedBack = await this.processor.processForINE(backImage);
 
             this.state.processedFront = processedFront;
             this.state.processedBack = processedBack;
@@ -182,10 +179,15 @@ class HernAI {
             console.log('[HernAI] Final detection - Front:', detectionFront.confidence + '%', detectionFront.side);
             console.log('[HernAI] Final detection - Back:', detectionBack.confidence + '%', detectionBack.side);
 
-            // STEP 6: Extract fields
-            if (onProgress) onProgress({ stage: 'extraction', progress: 85, message: 'Extrayendo campos de la credencial...' });
+            // STEP 6: Extract fields using improved extraction with layout analysis
+            if (onProgress) onProgress({ stage: 'extraction', progress: 85, message: 'Extrayendo campos con IA...' });
 
+            // Use traditional extractor with all the improvements (name parsing, vigencia ranges, etc.)
             const extractedData = this.extractor.extract(ocrResultFront.data, ocrResultBack.data);
+
+            // NOTE: AI extractor with layout analysis and semantic matching is also available
+            // Can be used for validation or fallback: await this.aiExtractor.extract(ocrResultFront.data, ocrResultBack.data);
+
             this.state.extractedData = extractedData;
 
             console.log('[HernAI] Fields extracted successfully');

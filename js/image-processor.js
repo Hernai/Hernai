@@ -449,41 +449,186 @@ class ImageProcessor {
     }
 
     /**
-     * Binarize image (convert to black & white)
+     * Advanced binarization with morphological operations
      */
     async binarize(canvas) {
-        console.log('[ImageProcessor] Binarizing...');
+        console.log('[ImageProcessor] Binarizing with advanced techniques...');
 
         if (this.isOpenCVReady) {
             try {
                 const src = cv.imread(canvas);
                 const gray = new cv.Mat();
                 const binary = new cv.Mat();
+                const morphed = new cv.Mat();
 
                 // Convert to grayscale
                 cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
 
-                // Apply adaptive thresholding
+                // Apply adaptive thresholding with optimized parameters for text
                 cv.adaptiveThreshold(
                     gray, binary, 255,
                     cv.ADAPTIVE_THRESH_GAUSSIAN_C,
-                    cv.THRESH_BINARY, 11, 2
+                    cv.THRESH_BINARY, 15, 3  // Larger block size for better text
                 );
 
+                // Morphological operations to clean up and connect broken text
+                const kernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(2, 2));
+
+                // Remove small noise
+                cv.morphologyEx(binary, morphed, cv.MORPH_OPEN, kernel);
+
+                // Close small gaps in text
+                cv.morphologyEx(morphed, morphed, cv.MORPH_CLOSE, kernel);
+
                 const outputCanvas = document.createElement('canvas');
-                cv.imshow(outputCanvas, binary);
+                cv.imshow(outputCanvas, morphed);
 
                 src.delete();
                 gray.delete();
                 binary.delete();
+                morphed.delete();
+                kernel.delete();
 
                 return outputCanvas;
             } catch (error) {
-                console.error('[ImageProcessor] Binarization failed:', error);
+                console.error('[ImageProcessor] Advanced binarization failed:', error);
             }
         }
 
         return canvas;
+    }
+
+    /**
+     * Deskew image (correct text skew/slant)
+     */
+    async deskew(canvas) {
+        if (!this.isOpenCVReady) {
+            return canvas;
+        }
+
+        console.log('[ImageProcessor] Deskewing image...');
+
+        try {
+            const src = cv.imread(canvas);
+            const gray = new cv.Mat();
+            const binary = new cv.Mat();
+            const coords = new cv.Mat();
+
+            // Convert to grayscale
+            cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+
+            // Binarize
+            cv.threshold(gray, binary, 0, 255, cv.THRESH_BINARY_INV + cv.THRESH_OTSU);
+
+            // Find all non-zero coordinates
+            cv.findNonZero(binary, coords);
+
+            if (coords.rows > 100) {  // Need enough points
+                // Get rotated bounding box
+                const rect = cv.minAreaRect(coords);
+                let angle = rect.angle;
+
+                // Adjust angle based on size
+                if (rect.size.width < rect.size.height) {
+                    angle = angle + 90;
+                }
+
+                // Only correct small angles (< 45 degrees)
+                if (Math.abs(angle) < 45 && Math.abs(angle) > 0.5) {
+                    console.log(`[ImageProcessor] Correcting skew angle: ${angle.toFixed(2)}°`);
+
+                    // Rotate to deskew
+                    const center = new cv.Point(src.cols / 2, src.rows / 2);
+                    const rotMat = cv.getRotationMatrix2D(center, angle, 1.0);
+                    const deskewed = new cv.Mat();
+
+                    cv.warpAffine(src, deskewed, rotMat, src.size(), cv.INTER_CUBIC, cv.BORDER_REPLICATE);
+
+                    const outputCanvas = document.createElement('canvas');
+                    cv.imshow(outputCanvas, deskewed);
+
+                    src.delete();
+                    gray.delete();
+                    binary.delete();
+                    coords.delete();
+                    rotMat.delete();
+                    deskewed.delete();
+
+                    return outputCanvas;
+                }
+            }
+
+            src.delete();
+            gray.delete();
+            binary.delete();
+            coords.delete();
+
+        } catch (error) {
+            console.error('[ImageProcessor] Deskewing failed:', error);
+        }
+
+        return canvas;
+    }
+
+    /**
+     * Process specifically for INE credentials with all advanced techniques
+     */
+    async processForINE(imageSource) {
+        console.log('[ImageProcessor] Processing with INE-optimized pipeline...');
+        const startTime = performance.now();
+
+        try {
+            // Load image
+            const image = await this.loadImage(imageSource);
+            let processedCanvas = this.imageToCanvas(image);
+
+            // Step 1: Resize to optimal dimensions
+            processedCanvas = await this.resize(processedCanvas, { width: 1800, height: 1200 });
+
+            // Step 2: Detect and correct rotation (90/180/270)
+            const rotation = await this.detectRotation(processedCanvas);
+            if (rotation.angle !== 0) {
+                processedCanvas = await this.rotate(processedCanvas, rotation.angle);
+            }
+
+            // Step 3: Deskew (correct small angle skew)
+            if (this.isOpenCVReady) {
+                processedCanvas = await this.deskew(processedCanvas);
+            }
+
+            // Step 4: Perspective correction
+            if (this.isOpenCVReady) {
+                processedCanvas = await this.correctPerspective(processedCanvas);
+            }
+
+            // Step 5: Enhanced contrast with CLAHE
+            processedCanvas = await this.enhanceContrast(processedCanvas);
+
+            // Step 6: Denoise
+            if (this.isOpenCVReady) {
+                processedCanvas = await this.denoise(processedCanvas);
+            }
+
+            // Step 7: Sharpen text
+            processedCanvas = await this.sharpen(processedCanvas);
+
+            // Step 8: Advanced binarization with morphology
+            processedCanvas = await this.binarize(processedCanvas);
+
+            const processingTime = performance.now() - startTime;
+            console.log(`[ImageProcessor] INE processing complete in ${processingTime.toFixed(2)}ms`);
+
+            return {
+                canvas: processedCanvas,
+                dataURL: processedCanvas.toDataURL('image/png'),
+                processingTime,
+                pipeline: 'ine_optimized'
+            };
+
+        } catch (error) {
+            console.error('[ImageProcessor] INE processing failed:', error);
+            throw new Error('Error en procesamiento optimizado de INE: ' + error.message);
+        }
     }
 
     /**
