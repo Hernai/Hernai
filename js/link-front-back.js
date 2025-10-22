@@ -5,10 +5,6 @@
  */
 
 class LinkFrontBack {
-    constructor() {
-        this.validators = new INEValidators();
-    }
-
     /**
      * Valida consistencia entre anverso y reverso
      * @param {Object} frontData - Datos extraídos del anverso
@@ -86,7 +82,7 @@ class LinkFrontBack {
 
         // Solo uno tiene CURP (válido dependiendo del modelo)
         const curp = curpFront || curpBack;
-        const validation = this.validators.validateCURP(curp);
+        const validation = INEValidators.validateCURP(curp);
 
         return {
             passed: validation.valid,
@@ -258,7 +254,7 @@ class LinkFrontBack {
             };
         }
 
-        const validation = this.validators.validateClaveElector(claveBack);
+        const validation = INEValidators.validateClaveElector(claveBack);
 
         return {
             passed: validation.valid,
