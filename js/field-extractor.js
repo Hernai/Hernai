@@ -1241,9 +1241,35 @@ class FieldExtractor {
             const fieldType = this.getFieldType(fieldKey);
 
             // 4. Run OCR with field-specific whitelist and PSM
+            // PSM modes: 3=auto, 6=block, 7=single line, 8=single word, 13=raw line
             let psm = 7; // Single line default
-            if (fieldKey === 'nombre' || fieldKey === 'domicilio') {
+            let whitelist = '';
+
+            // Configuración ESPECÍFICA por tipo de campo (más restrictiva)
+            if (fieldKey === 'nombre') {
+                psm = 6; // Block of text (puede tener múltiples líneas)
+                whitelist = 'ABCDEFGHIJKLMNOPQRSTUVWXYZÁÉÍÓÚÑ ';
+            } else if (fieldKey === 'domicilio') {
                 psm = 6; // Block of text
+                whitelist = 'ABCDEFGHIJKLMNOPQRSTUVWXYZÁÉÍÓÚÑ0123456789 .,-#';
+            } else if (fieldKey === 'curp') {
+                psm = 7; // Single line - CRÍTICO: solo una línea
+                whitelist = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+            } else if (fieldKey === 'clave_elector') {
+                psm = 7; // Single line
+                whitelist = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+            } else if (fieldKey === 'sexo') {
+                psm = 8; // Single word - MUY RESTRICTIVO
+                whitelist = 'HM';
+            } else if (fieldKey === 'seccion') {
+                psm = 7; // Single line
+                whitelist = '0123456789';
+            } else if (fieldKey === 'anio_registro' || fieldKey === 'vigencia' || fieldKey === 'fecha_nacimiento') {
+                psm = 7; // Single line
+                whitelist = '0123456789/-';
+            } else if (fieldKey === 'ocr_code') {
+                psm = 7; // Single line
+                whitelist = '0123456789';
             } else if (fieldKey === 'mrz') {
                 // Use OCRB for MRZ
                 const mrzResult = await ocr.recognizeOCRB(croppedCanvas);
@@ -1257,9 +1283,11 @@ class FieldExtractor {
                 };
             }
 
+            // Usar whitelist específico si se definió, sino usar el de fieldType
             const result = await ocr.recognizeWithWhitelist(croppedCanvas, {
-                fieldType: fieldType,
-                psm: psm
+                fieldType: whitelist ? null : fieldType,
+                psm: psm,
+                whitelist: whitelist || undefined
             });
 
             // 5. Normalize and correct using OCRCorrector
@@ -1320,8 +1348,26 @@ class FieldExtractor {
             0, 0, region.w, region.h                  // Destination
         );
 
-        // 2. Apply OCR-optimized preprocessing
-        return this.preprocessForOCR(temp);
+        // 2. Upscale small regions for better OCR (< 200px width)
+        let processedCanvas = temp;
+        if (temp.width < 200 || temp.height < 40) {
+            const scaleFactor = 3.0;  // Aumentado de 2.5 a 3.0
+            const scaledCanvas = document.createElement('canvas');
+            scaledCanvas.width = temp.width * scaleFactor;
+            scaledCanvas.height = temp.height * scaleFactor;
+            const scaledCtx = scaledCanvas.getContext('2d');
+            scaledCtx.imageSmoothingEnabled = true;
+            scaledCtx.imageSmoothingQuality = 'high';
+            scaledCtx.drawImage(temp, 0, 0, scaledCanvas.width, scaledCanvas.height);
+            processedCanvas = scaledCanvas;
+            console.log(`[FieldExtractor] Upscaled region from ${temp.width}×${temp.height} to ${scaledCanvas.width}×${scaledCanvas.height}`);
+        }
+
+        // 3. NO aplicar preprocessing agresivo - Tesseract funciona mejor con imagen original
+        // El preprocesamiento global de image-processor.js ya hizo CLAHE, denoise, etc.
+        // Aplicar más procesamiento puede BORRAR el texto en regiones pequeñas
+        console.log(`[FieldExtractor] Skipping heavy preprocessing for region (Tesseract works better with original)`);
+        return processedCanvas;
     }
 
     /**
@@ -1345,9 +1391,9 @@ class FieldExtractor {
         }
         const avgBrightness = totalBrightness / (data.length / 4);
 
-        // Adjust contrast and brightness
-        const contrast = 1.3;  // Increase contrast by 30%
-        const brightnessAdjust = avgBrightness < 128 ? 20 : -10;  // Brighten dark images, darken bright ones
+        // Adjust contrast and brightness (MORE AGGRESSIVE for better OCR)
+        const contrast = 1.6;  // Increase contrast by 60% for better text separation
+        const brightnessAdjust = avgBrightness < 128 ? 30 : -15;  // Brighten dark images more
 
         for (let i = 0; i < data.length; i += 4) {
             // Apply contrast and brightness
@@ -1596,6 +1642,247 @@ class FieldExtractor {
         }
 
         return merged;
+    }
+
+    /**
+     * Extract fields using layout-based coordinates (NEW SYSTEM)
+     * This replaces the old extract() method with precise region-based OCR
+     * @param {HTMLCanvasElement} canvasFront - Preprocessed front canvas (1012×638)
+     * @param {HTMLCanvasElement} canvasBack - Preprocessed back canvas (1012×638)
+     * @param {Object} ocr - OCREngine instance
+     * @param {Object} layout - INELayout instance
+     * @param {string} model - INE model (INE_2019, INE_2023, etc.)
+     * @returns {Promise<Object>} Extracted data in same format as old extract()
+     */
+    async extractWithLayout(canvasFront, canvasBack, ocr, layout, model = 'INE_2019') {
+        console.log('[FieldExtractor] 🎯 Using NEW layout-based extraction system');
+        console.log(`[FieldExtractor] Model: ${model}, Canvas size: ${canvasFront.width}×${canvasFront.height}`);
+
+        try {
+            // Extract fields from both sides using precise coordinates
+            const frontFields = await this.extractFrontFields(model, canvasFront, ocr, layout);
+            const backFields = await this.extractBackFields(model, canvasBack, ocr, layout);
+
+            // Detect and merge QR codes
+            console.log('[FieldExtractor] Detecting QR codes...');
+            const qrPayloads = await ocr.detectQRCodes(canvasBack);
+            console.log(`[FieldExtractor] Found ${qrPayloads.length} QR codes`);
+
+            // Merge QR data with OCR
+            const mergedFields = this.mergeQRWithOCR({ ...frontFields, ...backFields }, qrPayloads);
+
+            // Calculate overall confidence
+            const confidences = Object.values(mergedFields).map(f => f.confidence).filter(c => c > 0);
+            const avgConfidence = confidences.length > 0
+                ? confidences.reduce((a, b) => a + b, 0) / confidences.length
+                : 0;
+
+            // Build structured output compatible with old extract() format
+            const extractedData = {
+                metadata: {
+                    extraction_date: new Date().toISOString(),
+                    ocr_confidence_front: avgConfidence,
+                    ocr_confidence_back: avgConfidence,
+                    ocr_confidence_avg: avgConfidence,
+                    model: model,
+                    extraction_method: 'layout_based',
+                    version: '2.0.0'
+                },
+                personal_data: {
+                    nombre_completo: {
+                        valor: mergedFields.nombre?.value || '',
+                        confianza: mergedFields.nombre?.confidence || 0,
+                        fuente: mergedFields.nombre?.source || 'ocr',
+                        obligatorio: true,
+                        bbox: mergedFields.nombre?.bbox || [0, 0, 0, 0]
+                    },
+                    apellido_paterno: {
+                        valor: this.extractApellidoPaterno(mergedFields.nombre?.value || ''),
+                        confianza: mergedFields.nombre?.confidence || 0,
+                        fuente: 'nombre_completo',
+                        obligatorio: true
+                    },
+                    apellido_materno: {
+                        valor: this.extractApellidoMaterno(mergedFields.nombre?.value || ''),
+                        confianza: mergedFields.nombre?.confidence || 0,
+                        fuente: 'nombre_completo',
+                        obligatorio: true
+                    },
+                    nombres: {
+                        valor: this.extractNombres(mergedFields.nombre?.value || ''),
+                        confianza: mergedFields.nombre?.confidence || 0,
+                        fuente: 'nombre_completo',
+                        obligatorio: true
+                    },
+                    curp: {
+                        valor: mergedFields.curp?.value || '',
+                        confianza: mergedFields.curp?.confidence || 0,
+                        valido: mergedFields.curp?.value ? this.validateCURP(mergedFields.curp.value) : false,
+                        fuente: mergedFields.curp?.source || 'ocr',
+                        obligatorio: true,
+                        bbox: mergedFields.curp?.bbox || [0, 0, 0, 0]
+                    },
+                    fecha_nacimiento: {
+                        valor: this.extractFromCURP(mergedFields.curp?.value || '').fecha_nacimiento,
+                        confianza: mergedFields.curp?.value ? 95 : 0,
+                        fuente: 'curp',
+                        obligatorio: true
+                    },
+                    sexo: {
+                        valor: mergedFields.sexo?.value || this.extractFromCURP(mergedFields.curp?.value || '').sexo,
+                        confianza: mergedFields.sexo?.value ? mergedFields.sexo.confidence : (mergedFields.curp?.value ? 98 : 0),
+                        fuente: mergedFields.sexo?.value ? mergedFields.sexo.source : 'curp',
+                        obligatorio: true,
+                        bbox: mergedFields.sexo?.bbox || [0, 0, 0, 0]
+                    },
+                    entidad_nacimiento: {
+                        valor: this.extractFromCURP(mergedFields.curp?.value || '').entidad_nacimiento,
+                        confianza: mergedFields.curp?.value ? 90 : 0,
+                        fuente: 'curp',
+                        obligatorio: false
+                    }
+                },
+                electoral_data: {
+                    clave_elector: {
+                        valor: mergedFields.clave_elector?.value || '',
+                        confianza: mergedFields.clave_elector?.confidence || 0,
+                        valido: mergedFields.clave_elector?.value ? this.validateClaveElector(mergedFields.clave_elector.value) : false,
+                        fuente: mergedFields.clave_elector?.source || 'ocr',
+                        obligatorio: true,
+                        bbox: mergedFields.clave_elector?.bbox || [0, 0, 0, 0]
+                    },
+                    ocr: {
+                        valor: mergedFields.ocr_code?.value || '',
+                        confianza: mergedFields.ocr_code?.confidence || 0,
+                        valido: mergedFields.ocr_code?.value ? this.validateOCR(mergedFields.ocr_code.value) : false,
+                        fuente: mergedFields.ocr_code?.source || 'ocr',
+                        obligatorio: true,
+                        bbox: mergedFields.ocr_code?.bbox || [0, 0, 0, 0]
+                    },
+                    cic: {
+                        valor: '',
+                        confianza: 0,
+                        valido: false,
+                        fuente: 'ocr',
+                        obligatorio: false
+                    },
+                    ano_registro: {
+                        valor: mergedFields.anio_registro?.value || '',
+                        confianza: mergedFields.anio_registro?.confidence || 0,
+                        fuente: mergedFields.anio_registro?.source || 'ocr',
+                        obligatorio: false,
+                        bbox: mergedFields.anio_registro?.bbox || [0, 0, 0, 0]
+                    },
+                    ano_emision: {
+                        valor: '',
+                        confianza: 0,
+                        fuente: 'ocr',
+                        obligatorio: true
+                    },
+                    vigencia: {
+                        valor: mergedFields.vigencia?.value || '',
+                        confianza: mergedFields.vigencia?.confidence || 0,
+                        fuente: mergedFields.vigencia?.source || 'ocr',
+                        obligatorio: true,
+                        bbox: mergedFields.vigencia?.bbox || [0, 0, 0, 0]
+                    },
+                    seccion: {
+                        valor: mergedFields.seccion?.value || '',
+                        confianza: mergedFields.seccion?.confidence || 0,
+                        fuente: mergedFields.seccion?.source || 'ocr',
+                        obligatorio: true,
+                        bbox: mergedFields.seccion?.bbox || [0, 0, 0, 0]
+                    }
+                },
+                address: {
+                    visible: true,
+                    domicilio_completo: {
+                        valor: mergedFields.domicilio?.value || '',
+                        confianza: mergedFields.domicilio?.confidence || 0,
+                        fuente: mergedFields.domicilio?.source || 'ocr',
+                        obligatorio: false,
+                        bbox: mergedFields.domicilio?.bbox || [0, 0, 0, 0]
+                    },
+                    vialidad: {
+                        valor: '',
+                        confianza: 0,
+                        fuente: 'address_parser',
+                        obligatorio: false
+                    },
+                    numero_exterior: {
+                        valor: '',
+                        confianza: 0,
+                        fuente: 'address_parser',
+                        obligatorio: false
+                    },
+                    localidad: {
+                        valor: '',
+                        confianza: 0,
+                        fuente: 'ocr',
+                        obligatorio: false
+                    },
+                    codigo_postal: {
+                        valor: '',
+                        confianza: 0,
+                        valido: false,
+                        fuente: 'ocr',
+                        obligatorio: false
+                    },
+                    municipio: {
+                        valor: '',
+                        confianza: 0,
+                        fuente: 'ocr',
+                        obligatorio: true
+                    },
+                    estado: {
+                        valor: '',
+                        confianza: 0,
+                        fuente: 'ocr',
+                        obligatorio: true
+                    }
+                },
+                raw_text: {
+                    front: Object.values(frontFields).map(f => f.value).join(' '),
+                    back: Object.values(backFields).map(f => f.value).join(' ')
+                }
+            };
+
+            // Validate extraction quality
+            extractedData.quality = this.assessQuality(extractedData);
+
+            console.log('[FieldExtractor] ✅ Layout-based extraction complete');
+            console.log(`[FieldExtractor] Overall confidence: ${avgConfidence.toFixed(1)}%`);
+
+            return extractedData;
+
+        } catch (error) {
+            console.error('[FieldExtractor] Layout-based extraction failed:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Helper: Extract apellido paterno from full name
+     */
+    extractApellidoPaterno(nombreCompleto) {
+        const parts = nombreCompleto.trim().split(/\s+/);
+        return parts.length > 0 ? parts[0] : '';
+    }
+
+    /**
+     * Helper: Extract apellido materno from full name
+     */
+    extractApellidoMaterno(nombreCompleto) {
+        const parts = nombreCompleto.trim().split(/\s+/);
+        return parts.length > 1 ? parts[1] : '';
+    }
+
+    /**
+     * Helper: Extract nombres from full name
+     */
+    extractNombres(nombreCompleto) {
+        const parts = nombreCompleto.trim().split(/\s+/);
+        return parts.length > 2 ? parts.slice(2).join(' ') : '';
     }
 
     // ========================================================================

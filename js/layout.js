@@ -27,25 +27,25 @@ class INELayout {
                     // Foto del ciudadano (izquierda)
                     foto: [0.05, 0.18, 0.24, 0.50],
 
-                    // Campos de texto (derecha) - Ajustados para INE real
-                    nombre: [0.31, 0.13, 0.64, 0.10],  // Más arriba y más ancho
-                    domicilio: [0.31, 0.25, 0.64, 0.18],  // Más espacio para 2-3 líneas
+                    // Campos de texto (derecha) - Coordenadas ajustadas precisamente
+                    nombre: [0.31, 0.18, 0.64, 0.09],  // Ajustado: más abajo para evitar encabezado
+                    domicilio: [0.31, 0.29, 0.64, 0.15],  // Ajustado: después del nombre
 
-                    // Campos en bloque inferior - Ajustados según layout real
-                    clave_elector: [0.31, 0.48, 0.38, 0.07],
-                    curp: [0.31, 0.57, 0.45, 0.07],
-                    sexo: [0.78, 0.57, 0.15, 0.07],
-                    fecha_nacimiento: [0.31, 0.66, 0.28, 0.07],
-                    anio_registro: [0.62, 0.66, 0.18, 0.07],
+                    // Campos en bloque medio - Ajustados según layout real de INE 2019
+                    clave_elector: [0.31, 0.47, 0.38, 0.07],
+                    curp: [0.31, 0.56, 0.45, 0.07],
+                    sexo: [0.78, 0.56, 0.15, 0.07],
+                    fecha_nacimiento: [0.31, 0.65, 0.28, 0.07],
+                    anio_registro: [0.62, 0.65, 0.18, 0.07],
 
-                    // Campos administrativos
-                    seccion: [0.31, 0.76, 0.18, 0.07],
-                    localidad: [0.51, 0.76, 0.22, 0.07],
-                    municipio: [0.75, 0.76, 0.20, 0.07],
+                    // Campos administrativos inferiores
+                    seccion: [0.31, 0.75, 0.18, 0.07],
+                    localidad: [0.51, 0.75, 0.22, 0.07],
+                    municipio: [0.75, 0.75, 0.20, 0.07],
 
                     // Elementos visuales
                     firma: [0.05, 0.72, 0.24, 0.18],
-                    vigencia: [0.31, 0.87, 0.30, 0.07]
+                    vigencia: [0.31, 0.86, 0.30, 0.07]
                 },
                 back: {
                     // Banda MRZ (OCR-B con <<)

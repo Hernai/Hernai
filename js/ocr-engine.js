@@ -523,11 +523,12 @@ class OCREngine {
     async recognizeWithWhitelist(imageData, options = {}) {
         const fieldType = options.fieldType || 'general';
         const psm = options.psm || 6; // Default: Assume uniform block of text
-        const whitelist = this.getWhitelist(fieldType);
+        // Usar whitelist de options si existe, sino obtener del fieldType
+        const whitelist = options.whitelist || (fieldType !== null ? this.getWhitelist(fieldType) : '');
 
-        console.log(`[OCR] Recognizing field type '${fieldType}' with whitelist: ${whitelist ? whitelist.substring(0, 20) + '...' : 'none'}`);
+        console.log(`[OCR] Recognizing with PSM=${psm}, whitelist: ${whitelist ? whitelist.substring(0, 30) + (whitelist.length > 30 ? '...' : '') : 'none'}`);
 
-        // Configurar whitelist si se especificó
+        // Configurar whitelist y PSM si se especificó
         if (whitelist) {
             await this.tesseractWorker.setParameters({
                 tessedit_char_whitelist: whitelist,

@@ -11,6 +11,7 @@ class HernAI {
         this.processor = new ImageProcessor();
         this.extractor = new FieldExtractor();
         this.aiExtractor = new AIFieldExtractor();  // AI-powered field extraction
+        this.layout = new INELayout();  // Layout coordinator for field coordinates
 
         // Anti-fraud modules (Fase 2)
         this.dedupeHash = new DedupeHash();
@@ -279,18 +280,34 @@ class HernAI {
 
             console.log('[HernAI] ✅ Lados finales - Anverso:', finalFrontDetection.side, 'Reverso:', finalBackDetection.side);
 
-            // STEP 6: Extract fields using improved extraction with layout analysis
-            if (onProgress) onProgress({ stage: 'extraction', progress: 85, message: 'Extrayendo campos con IA...' });
+            // STEP 6: Extract fields using NEW layout-based extraction system
+            if (onProgress) onProgress({ stage: 'extraction', progress: 85, message: 'Extrayendo campos con coordenadas precisas...' });
 
-            // Use traditional extractor with CORRECTED images
-            const extractedData = this.extractor.extract(finalFrontOCR.data, finalBackOCR.data);
+            // Determine INE model from detection
+            const ineModel = finalFrontDetection.model || finalBackDetection.model || 'INE_2019';
+            console.log(`[HernAI] Using model: ${ineModel}`);
 
-            // NOTE: AI extractor with layout analysis and semantic matching is also available
-            // Can be used for validation or fallback: await this.aiExtractor.extract(ocrResultFront.data, ocrResultBack.data);
+            // Convert processed dataURLs to canvas for region-based OCR
+            const canvasFront = await this.dataURLToCanvas(
+                finalFrontImage === frontImage ? this.state.processedFront.dataURL : this.state.processedBack.dataURL
+            );
+            const canvasBack = await this.dataURLToCanvas(
+                finalBackImage === backImage ? this.state.processedBack.dataURL : this.state.processedFront.dataURL
+            );
+
+            // Use NEW layout-based extraction (precise coordinates)
+            const extractedData = await this.extractor.extractWithLayout(
+                canvasFront,
+                canvasBack,
+                this.ocr,
+                this.layout,
+                ineModel
+            );
 
             this.state.extractedData = extractedData;
 
-            console.log('[HernAI] Fields extracted successfully');
+            console.log('[HernAI] ✅ Fields extracted with layout-based system');
+            console.log(`[HernAI] Extraction confidence: ${extractedData.metadata.ocr_confidence_avg.toFixed(1)}%`);
 
             // STEP 7: Validate data
             if (!config.skipValidation) {
@@ -895,6 +912,27 @@ if (typeof document !== 'undefined') {
                 .catch(error => {
                     console.error('[PWA] Service Worker registration failed:', error);
                 });
+        });
+    }
+
+    /**
+     * Convert dataURL to canvas
+     * @param {string} dataURL - Data URL of image
+     * @returns {Promise<HTMLCanvasElement>}
+     */
+    async dataURLToCanvas(dataURL) {
+        return new Promise((resolve, reject) => {
+            const img = new Image();
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                canvas.width = img.width;
+                canvas.height = img.height;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0);
+                resolve(canvas);
+            };
+            img.onerror = reject;
+            img.src = dataURL;
         });
     }
 }

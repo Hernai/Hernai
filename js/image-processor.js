@@ -490,21 +490,23 @@ class ImageProcessor {
                 // Convert to grayscale
                 cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
 
-                // Apply adaptive thresholding with AGGRESSIVE parameters to SEPARATE words
-                // Even larger block size and higher C value to maximize separation
+                // Apply adaptive thresholding with MORE AGGRESSIVE parameters for better text extraction
+                // Larger block size (35) and smaller C value (2) for cleaner separation
                 cv.adaptiveThreshold(
                     gray, binary, 255,
                     cv.ADAPTIVE_THRESH_GAUSSIAN_C,
-                    cv.THRESH_BINARY, 25, 10  // Máximo separación: block=25, C=10
+                    cv.THRESH_BINARY, 35, 2  // Parámetros mejorados: block=35, C=2
                 );
 
-                // Use STRONGER EROSION to separate touching characters/words (2 iterations)
-                const erodeKernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(2, 1));
-                cv.erode(binary, morphed, erodeKernel, new cv.Point(-1, -1), 2);
+                // Apply MORPHOLOGICAL CLOSING (dilation + erosion) to connect broken text strokes
+                const closeKernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(3, 3));
+                cv.morphologyEx(binary, morphed, cv.MORPH_CLOSE, closeKernel);
 
                 // Remove tiny noise with small opening
                 const noiseKernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(2, 2));
                 cv.morphologyEx(morphed, morphed, cv.MORPH_OPEN, noiseKernel);
+
+                closeKernel.delete();
 
                 const outputCanvas = document.createElement('canvas');
                 cv.imshow(outputCanvas, morphed);
@@ -734,8 +736,10 @@ class ImageProcessor {
             // Step 7: Sharpen text - ONLY on text regions
             processedCanvas = await this.sharpen(processedCanvas);
 
-            // Step 8: Advanced binarization with morphology - ONLY on text regions
-            processedCanvas = await this.binarize(processedCanvas);
+            // Step 8: SKIP binarization - Tesseract works BETTER with grayscale images
+            // Binarization was REMOVING text and causing 0% confidence
+            // CLAHE + denoise + sharpen is sufficient for good OCR
+            console.log('[ImageProcessor] ⚠️ Skipping binarization - using grayscale for better OCR');
 
             // Step 9: Apply text mask to zero out photo area
             if (textMask && this.isOpenCVReady) {
