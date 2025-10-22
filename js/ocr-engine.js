@@ -81,13 +81,9 @@ class OCREngine {
             console.log('[OCR] Loading Tesseract.js...');
 
             // Create worker with Tesseract.js v5 API
+            // NOTE: logger cannot capture external functions (causes DataCloneError)
             this.tesseractWorker = await Tesseract.createWorker({
-                logger: (m) => {
-                    console.log('[OCR]', m);
-                    if (onProgress && m.status === 'recognizing text') {
-                        onProgress(m.progress * 100);
-                    }
-                }
+                logger: (m) => console.log('[OCR]', m)
             });
 
             // Load and initialize language
