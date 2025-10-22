@@ -1,24 +1,25 @@
 /**
- * Service Worker para HernAI - Scanner INE
+ * Service Worker para INE Scanner AI
  * Habilita funcionamiento offline y caché de recursos
  */
 
-const CACHE_NAME = 'hernai-v1.0.0';
+const CACHE_NAME = 'ine-scanner-ai-v1.0.0';
 const CACHE_URLS = [
-    '/',
-    '/index.html',
-    '/manifest.json',
-    '/css/styles.css',
-    '/js/app.js',
-    '/js/ocr-engine.js',
-    '/js/ine-detector.js',
-    '/js/image-processor.js',
-    '/js/field-extractor.js',
-    '/js/validators.js'
+    './',
+    './index.html',
+    './manifest.json',
+    './css/styles.css',
+    './js/app.js',
+    './js/ocr-engine.js',
+    './js/ine-detector.js',
+    './js/image-processor.js',
+    './js/field-extractor.js',
+    './js/validators.js',
+    './js/main.js'
 ];
 
 // CDN resources (cached separately)
-const CDN_CACHE = 'hernai-cdn-v1.0.0';
+const CDN_CACHE = 'ine-scanner-ai-cdn-v1.0.0';
 const CDN_URLS = [
     'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.10.0/dist/transformers.min.js',
     'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js',
@@ -112,7 +113,7 @@ self.addEventListener('fetch', (event) => {
 
                 // Return a custom offline page if available
                 if (request.destination === 'document') {
-                    return caches.match('/offline.html');
+                    return caches.match('./offline.html');
                 }
 
                 throw error;
@@ -164,15 +165,15 @@ self.addEventListener('push', (event) => {
 
     const options = {
         body: event.data ? event.data.text() : 'Nueva notificación',
-        icon: '/assets/icons/icon-192x192.png',
-        badge: '/assets/icons/icon-72x72.png',
+        icon: './assets/icons/icon-192x192.png',
+        badge: './assets/icons/icon-72x72.png',
         vibrate: [200, 100, 200],
-        tag: 'hernai-notification',
+        tag: 'ine-scanner-notification',
         requireInteraction: false
     };
 
     event.waitUntil(
-        self.registration.showNotification('HernAI Scanner', options)
+        self.registration.showNotification('INE Scanner AI', options)
     );
 });
 
@@ -182,7 +183,7 @@ self.addEventListener('notificationclick', (event) => {
     event.notification.close();
 
     event.waitUntil(
-        clients.openWindow('/')
+        clients.openWindow('./')
     );
 });
 
