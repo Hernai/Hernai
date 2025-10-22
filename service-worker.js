@@ -3,7 +3,7 @@
  * Provides offline-first caching strategy for browser-only operation
  */
 
-const CACHE_VERSION = 'hernai-v1.0.3';
+const CACHE_VERSION = 'hernai-v1.0.4';
 const CACHE_NAME = `hernai-ine-scanner-${CACHE_VERSION}`;
 
 // Static assets to cache on install
@@ -12,6 +12,7 @@ const STATIC_ASSETS = [
     './index.html',
     './main.js',
     './manifest.json',
+    './assets/favicon.svg',
 
     // Core pipeline modules (Fase 1)
     './js/app.js',
