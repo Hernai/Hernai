@@ -332,6 +332,199 @@ class CardDetector {
     }
 
     /**
+     * Detect orientation by reading header text "CREDENCIAL PARA VOTAR"
+     * Rotates image automatically if needed (180°, ±90°)
+     * @param {cv.Mat} cardMat - Card image after perspective correction
+     * @param {Object} ocrEngine - OCR engine instance for quick text detection
+     * @returns {cv.Mat} Correctly oriented card
+     */
+    async detectAndCorrectOrientation(cardMat, ocrEngine) {
+        if (!this.isOpenCVReady || !ocrEngine) {
+            console.warn('[CardDetector] Skipping orientation detection (OpenCV or OCR not available)');
+            return cardMat;
+        }
+
+        console.log('[CardDetector] Detecting card orientation...');
+
+        try {
+            // Extract header region (top 20% of card where "CREDENCIAL PARA VOTAR" should be)
+            const headerHeight = Math.floor(cardMat.rows * 0.20);
+            const headerRegion = cardMat.roi(new cv.Rect(0, 0, cardMat.cols, headerHeight));
+
+            // Convert to canvas for OCR
+            const headerCanvas = document.createElement('canvas');
+            cv.imshow(headerCanvas, headerRegion);
+            headerRegion.delete();
+
+            // Quick OCR with PSM 3 (auto page segmentation)
+            const ocrResult = await ocrEngine.recognizeWithWhitelist(headerCanvas, {
+                psm: 3,
+                whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZÁÉÍÓÚÑ '
+            });
+
+            const text = (ocrResult.text || '').toUpperCase().replace(/\s+/g, ' ');
+            console.log('[CardDetector] Header text detected:', text.substring(0, 50));
+
+            // Check if header contains expected keywords
+            const hasCredencial = text.includes('CREDENCIAL');
+            const hasVotar = text.includes('VOTAR');
+            const hasINE = text.includes('INE') || text.includes('INSTITUTO');
+
+            // Orientation is correct if we find the expected text
+            if (hasCredencial || hasVotar || hasINE) {
+                console.log('[CardDetector] ✅ Card orientation is correct');
+                return cardMat;
+            }
+
+            // Try 180° rotation
+            console.log('[CardDetector] Trying 180° rotation...');
+            const rotated180 = new cv.Mat();
+            cv.rotate(cardMat, rotated180, cv.ROTATE_180);
+
+            const headerRegion180 = rotated180.roi(new cv.Rect(0, 0, rotated180.cols, headerHeight));
+            const headerCanvas180 = document.createElement('canvas');
+            cv.imshow(headerCanvas180, headerRegion180);
+            headerRegion180.delete();
+
+            const ocrResult180 = await ocrEngine.recognizeWithWhitelist(headerCanvas180, {
+                psm: 3,
+                whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZÁÉÍÓÚÑ '
+            });
+
+            const text180 = (ocrResult180.text || '').toUpperCase().replace(/\s+/g, ' ');
+            console.log('[CardDetector] Header text at 180°:', text180.substring(0, 50));
+
+            if (text180.includes('CREDENCIAL') || text180.includes('VOTAR') || text180.includes('INE')) {
+                console.log('[CardDetector] ✅ Card was upside down, rotated 180°');
+                cardMat.delete();
+                return rotated180;
+            }
+
+            // If neither 0° nor 180° works, try 90° clockwise
+            console.log('[CardDetector] Trying 90° rotation...');
+            rotated180.delete();
+            const rotated90 = new cv.Mat();
+            cv.rotate(cardMat, rotated90, cv.ROTATE_90_CLOCKWISE);
+
+            // For 90° rotation, check left edge (now top)
+            const leftEdge = rotated90.roi(new cv.Rect(0, 0, rotated90.cols, Math.floor(rotated90.rows * 0.20)));
+            const leftCanvas = document.createElement('canvas');
+            cv.imshow(leftCanvas, leftEdge);
+            leftEdge.delete();
+
+            const ocrResult90 = await ocrEngine.recognizeWithWhitelist(leftCanvas, {
+                psm: 3,
+                whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZÁÉÍÓÚÑ '
+            });
+
+            const text90 = (ocrResult90.text || '').toUpperCase().replace(/\s+/g, ' ');
+
+            if (text90.includes('CREDENCIAL') || text90.includes('VOTAR')) {
+                console.log('[CardDetector] ✅ Card was rotated 90° CW');
+                cardMat.delete();
+                return rotated90;
+            }
+
+            // Try 270° (90° CCW)
+            rotated90.delete();
+            const rotated270 = new cv.Mat();
+            cv.rotate(cardMat, rotated270, cv.ROTATE_90_COUNTERCLOCKWISE);
+
+            console.log('[CardDetector] ⚠️ Could not detect orientation reliably, using original');
+            rotated270.delete();
+            return cardMat;
+
+        } catch (error) {
+            console.error('[CardDetector] Orientation detection failed:', error);
+            return cardMat;
+        }
+    }
+
+    /**
+     * Crop white margins left by perspective transform
+     * @param {cv.Mat} cardMat - Card image with potential white margins
+     * @returns {cv.Mat} Cropped card without margins
+     */
+    cropWhiteMargins(cardMat) {
+        if (!this.isOpenCVReady) {
+            return cardMat;
+        }
+
+        console.log('[CardDetector] Cropping white margins...');
+
+        try {
+            // Convert to grayscale
+            const gray = new cv.Mat();
+            cv.cvtColor(cardMat, gray, cv.COLOR_RGBA2GRAY);
+
+            // Threshold to find non-white regions (card content)
+            const binary = new cv.Mat();
+            cv.threshold(gray, binary, 245, 255, cv.THRESH_BINARY_INV);
+
+            // Find bounding box of non-white content
+            const contours = new cv.MatVector();
+            const hierarchy = new cv.Mat();
+            cv.findContours(binary, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+
+            let minX = cardMat.cols, minY = cardMat.rows;
+            let maxX = 0, maxY = 0;
+
+            for (let i = 0; i < contours.size(); i++) {
+                const contour = contours.get(i);
+                const rect = cv.boundingRect(contour);
+
+                minX = Math.min(minX, rect.x);
+                minY = Math.min(minY, rect.y);
+                maxX = Math.max(maxX, rect.x + rect.width);
+                maxY = Math.max(maxY, rect.y + rect.height);
+
+                contour.delete();
+            }
+
+            gray.delete();
+            binary.delete();
+            contours.delete();
+            hierarchy.delete();
+
+            // Add small margin (2% of dimensions)
+            const marginX = Math.floor(cardMat.cols * 0.02);
+            const marginY = Math.floor(cardMat.rows * 0.02);
+
+            minX = Math.max(0, minX - marginX);
+            minY = Math.max(0, minY - marginY);
+            maxX = Math.min(cardMat.cols, maxX + marginX);
+            maxY = Math.min(cardMat.rows, maxY + marginY);
+
+            const width = maxX - minX;
+            const height = maxY - minY;
+
+            // Only crop if margins are significant (> 5% on any side)
+            const topMargin = minY / cardMat.rows;
+            const bottomMargin = (cardMat.rows - maxY) / cardMat.rows;
+            const leftMargin = minX / cardMat.cols;
+            const rightMargin = (cardMat.cols - maxX) / cardMat.cols;
+
+            if (topMargin > 0.05 || bottomMargin > 0.05 || leftMargin > 0.05 || rightMargin > 0.05) {
+                console.log(`[CardDetector] Cropping margins: top=${(topMargin*100).toFixed(1)}%, bottom=${(bottomMargin*100).toFixed(1)}%, left=${(leftMargin*100).toFixed(1)}%, right=${(rightMargin*100).toFixed(1)}%`);
+
+                const cropped = cardMat.roi(new cv.Rect(minX, minY, width, height));
+                const croppedClone = cropped.clone();
+                cropped.delete();
+                cardMat.delete();
+
+                return croppedClone;
+            } else {
+                console.log('[CardDetector] No significant margins to crop');
+                return cardMat;
+            }
+
+        } catch (error) {
+            console.error('[CardDetector] Margin cropping failed:', error);
+            return cardMat;
+        }
+    }
+
+    /**
      * Segment regions of interest (text areas vs photo)
      * Returns mask for text-only regions
      */

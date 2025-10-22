@@ -25,27 +25,35 @@ class INELayout {
             INE_2019: {
                 front: {
                     // Foto del ciudadano (izquierda)
-                    foto: [0.05, 0.18, 0.24, 0.50],
+                    foto: [0.05, 0.20, 0.24, 0.48],
 
-                    // Campos de texto (derecha) - Coordenadas ajustadas precisamente
-                    nombre: [0.31, 0.18, 0.64, 0.09],  // Ajustado: más abajo para evitar encabezado
-                    domicilio: [0.31, 0.29, 0.64, 0.15],  // Ajustado: después del nombre
+                    // Campos de texto (derecha) - Coordenadas ajustadas basadas en resultados reales
+                    // NOMBRE está típicamente en Y≈0.26-0.28 (después del encabezado INE en Y≈0.15)
+                    nombre: [0.31, 0.27, 0.64, 0.08],  // Movido de 0.18→0.27 para evitar logo INE
+
+                    // DOMICILIO está debajo del nombre, típicamente Y≈0.36-0.42
+                    domicilio: [0.31, 0.37, 0.64, 0.12],  // Movido de 0.29→0.37 para estar después del nombre
 
                     // Campos en bloque medio - Ajustados según layout real de INE 2019
-                    clave_elector: [0.31, 0.47, 0.38, 0.07],
-                    curp: [0.31, 0.56, 0.45, 0.07],
-                    sexo: [0.78, 0.56, 0.15, 0.07],
-                    fecha_nacimiento: [0.31, 0.65, 0.28, 0.07],
-                    anio_registro: [0.62, 0.65, 0.18, 0.07],
+                    // CLAVE ELECTOR en Y≈0.51
+                    clave_elector: [0.31, 0.51, 0.38, 0.06],
 
-                    // Campos administrativos inferiores
-                    seccion: [0.31, 0.75, 0.18, 0.07],
-                    localidad: [0.51, 0.75, 0.22, 0.07],
-                    municipio: [0.75, 0.75, 0.20, 0.07],
+                    // CURP y SEXO en la misma línea Y≈0.58
+                    curp: [0.31, 0.58, 0.45, 0.06],
+                    sexo: [0.78, 0.58, 0.15, 0.06],
+
+                    // FECHA NACIMIENTO y AÑO REGISTRO en Y≈0.66
+                    fecha_nacimiento: [0.31, 0.66, 0.28, 0.06],
+                    anio_registro: [0.62, 0.66, 0.18, 0.06],
+
+                    // Campos administrativos inferiores Y≈0.76
+                    seccion: [0.31, 0.76, 0.18, 0.06],
+                    localidad: [0.51, 0.76, 0.22, 0.06],
+                    municipio: [0.75, 0.76, 0.20, 0.06],
 
                     // Elementos visuales
                     firma: [0.05, 0.72, 0.24, 0.18],
-                    vigencia: [0.31, 0.86, 0.30, 0.07]
+                    vigencia: [0.31, 0.86, 0.30, 0.06]
                 },
                 back: {
                     // Banda MRZ (OCR-B con <<)

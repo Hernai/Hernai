@@ -1235,7 +1235,7 @@ class FieldExtractor {
             }
 
             // 2. Crop canvas region
-            const croppedCanvas = this.cropRegion(canvas, region);
+            const croppedCanvas = this.cropRegion(canvas, region, fieldKey);
 
             // 3. Get field type for whitelist
             const fieldType = this.getFieldType(fieldKey);
@@ -1305,13 +1305,49 @@ class FieldExtractor {
             // 6. Validate field
             const validation = this.validateFieldValue(fieldKey, value);
 
-            // 7. Boost confidence if validation passes
+            // 7. Retry with alternative preprocessing if validation fails and confidence is low
+            if (!validation.valid && result.confidence < 70) {
+                console.log(`[FieldExtractor] ⚠️ Validation failed for ${fieldKey} (confidence: ${result.confidence}%), retrying with Otsu binarization...`);
+
+                // Try with Otsu threshold instead of adaptive
+                const retryCanvas = await this.preprocessWithOtsu(croppedCanvas, fieldKey);
+
+                const retryResult = await ocr.recognizeWithWhitelist(retryCanvas, {
+                    fieldType: whitelist ? null : fieldType,
+                    psm: psm,
+                    whitelist: whitelist || undefined
+                });
+
+                let retryValue = retryResult.text.trim().toUpperCase();
+
+                // Apply corrections
+                if (fieldType === 'alphanumeric_id') {
+                    retryValue = this.ocrCorrector.fixOcrConfusions(retryValue, 'alphanumeric_id');
+                } else if (fieldType === 'numeric_id') {
+                    retryValue = this.ocrCorrector.fixOcrConfusions(retryValue, 'numeric_id');
+                } else {
+                    retryValue = this.ocrCorrector.correctText(retryValue, { type: fieldType });
+                }
+
+                // Validate retry result
+                const retryValidation = this.validateFieldValue(fieldKey, retryValue);
+
+                if (retryValidation.valid || retryResult.confidence > result.confidence) {
+                    console.log(`[FieldExtractor] ✅ Retry succeeded for ${fieldKey}: "${retryValue}" (confidence: ${retryResult.confidence}%)`);
+                    value = retryValue;
+                    result.confidence = retryResult.confidence;
+                } else {
+                    console.log(`[FieldExtractor] ❌ Retry failed for ${fieldKey}, using original result`);
+                }
+            }
+
+            // 8. Boost confidence if validation passes
             let confidence = result.confidence || 0;
-            if (validation.valid) {
+            if (validation.valid || this.validateFieldValue(fieldKey, value).valid) {
                 confidence = Math.min(100, confidence + 10);
             }
 
-            // 8. Return standardized format
+            // 9. Return standardized format
             return {
                 value,
                 confidence: Math.min(100, Math.round(confidence)),
@@ -1331,12 +1367,13 @@ class FieldExtractor {
     }
 
     /**
-     * Crop a region from canvas with OCR-optimized preprocessing
+     * Crop a region from canvas with adaptive preprocessing per field type
      * @param {HTMLCanvasElement} canvas - Source canvas
      * @param {Object} region - {x, y, w, h} in pixels
+     * @param {string} fieldKey - Field identifier for adaptive preprocessing
      * @returns {HTMLCanvasElement} Cropped and preprocessed canvas
      */
-    cropRegion(canvas, region) {
+    cropRegion(canvas, region, fieldKey = null) {
         // 1. Crop the region
         const temp = document.createElement('canvas');
         temp.width = region.w;
@@ -1351,7 +1388,7 @@ class FieldExtractor {
         // 2. Upscale small regions for better OCR (< 200px width)
         let processedCanvas = temp;
         if (temp.width < 200 || temp.height < 40) {
-            const scaleFactor = 3.0;  // Aumentado de 2.5 a 3.0
+            const scaleFactor = 3.0;  // 3x for small regions
             const scaledCanvas = document.createElement('canvas');
             scaledCanvas.width = temp.width * scaleFactor;
             scaledCanvas.height = temp.height * scaleFactor;
@@ -1363,11 +1400,250 @@ class FieldExtractor {
             console.log(`[FieldExtractor] Upscaled region from ${temp.width}×${temp.height} to ${scaledCanvas.width}×${scaledCanvas.height}`);
         }
 
-        // 3. NO aplicar preprocessing agresivo - Tesseract funciona mejor con imagen original
-        // El preprocesamiento global de image-processor.js ya hizo CLAHE, denoise, etc.
-        // Aplicar más procesamiento puede BORRAR el texto en regiones pequeñas
-        console.log(`[FieldExtractor] Skipping heavy preprocessing for region (Tesseract works better with original)`);
+        // 3. Apply adaptive preprocessing based on field type
+        if (fieldKey && typeof cv !== 'undefined' && cv.Mat) {
+            try {
+                processedCanvas = this.applyAdaptivePreprocessing(processedCanvas, fieldKey);
+            } catch (error) {
+                console.warn(`[FieldExtractor] Adaptive preprocessing failed for ${fieldKey}, using original:`, error);
+            }
+        } else {
+            console.log(`[FieldExtractor] Skipping OpenCV preprocessing (not available or no fieldKey)`);
+        }
+
         return processedCanvas;
+    }
+
+    /**
+     * Apply adaptive preprocessing based on field type
+     * - Text fields (nombre, domicilio): Adaptive threshold + morphological closing
+     * - Numeric IDs (curp, clave_elector): Adaptive threshold + dilation
+     * - Small fields (sexo, seccion): Aggressive binarization
+     * @param {HTMLCanvasElement} canvas
+     * @param {string} fieldKey
+     * @returns {HTMLCanvasElement}
+     */
+    applyAdaptivePreprocessing(canvas, fieldKey) {
+        const src = cv.imread(canvas);
+        const gray = new cv.Mat();
+        const processed = new cv.Mat();
+
+        try {
+            // Convert to grayscale
+            cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+
+            // Determine preprocessing strategy based on field type
+            const fieldConfig = this.getPreprocessingConfig(fieldKey);
+
+            if (fieldConfig.useBinarization) {
+                // Apply adaptive threshold
+                cv.adaptiveThreshold(
+                    gray, processed, 255,
+                    cv.ADAPTIVE_THRESH_GAUSSIAN_C,
+                    cv.THRESH_BINARY,
+                    fieldConfig.blockSize,
+                    fieldConfig.C
+                );
+
+                // Apply morphological operations for thin text
+                if (fieldConfig.useMorphology) {
+                    const kernel = cv.getStructuringElement(
+                        cv.MORPH_RECT,
+                        new cv.Size(fieldConfig.kernelSize, fieldConfig.kernelSize)
+                    );
+
+                    if (fieldConfig.operation === 'closing') {
+                        // Closing: dilate then erode (connects broken text)
+                        cv.morphologyEx(processed, processed, cv.MORPH_CLOSE, kernel);
+                        console.log(`[FieldExtractor] Applied morphological closing for ${fieldKey}`);
+                    } else if (fieldConfig.operation === 'dilate') {
+                        // Dilate only (thicken thin text)
+                        cv.dilate(processed, processed, kernel);
+                        console.log(`[FieldExtractor] Applied dilation for ${fieldKey}`);
+                    }
+
+                    kernel.delete();
+                }
+
+                console.log(`[FieldExtractor] Applied adaptive preprocessing for ${fieldKey}: blockSize=${fieldConfig.blockSize}, C=${fieldConfig.C}`);
+            } else {
+                // No binarization, just use grayscale (Tesseract handles it internally)
+                cv.cvtColor(src, processed, cv.COLOR_RGBA2GRAY);
+                console.log(`[FieldExtractor] Using grayscale only for ${fieldKey} (Tesseract internal preprocessing)`);
+            }
+
+            // Convert back to canvas
+            const outputCanvas = document.createElement('canvas');
+            cv.imshow(outputCanvas, processed);
+
+            src.delete();
+            gray.delete();
+            processed.delete();
+
+            return outputCanvas;
+
+        } catch (error) {
+            console.error(`[FieldExtractor] Preprocessing error for ${fieldKey}:`, error);
+            src.delete();
+            gray.delete();
+            processed.delete();
+            return canvas;  // Return original on error
+        }
+    }
+
+    /**
+     * Get preprocessing configuration for each field type
+     * @param {string} fieldKey
+     * @returns {Object} Configuration: {useBinarization, blockSize, C, useMorphology, operation, kernelSize}
+     */
+    getPreprocessingConfig(fieldKey) {
+        const configs = {
+            // Text blocks: moderate binarization + closing for broken text
+            'nombre': {
+                useBinarization: true,
+                blockSize: 35,
+                C: 2,
+                useMorphology: true,
+                operation: 'closing',
+                kernelSize: 2
+            },
+            'domicilio': {
+                useBinarization: true,
+                blockSize: 35,
+                C: 2,
+                useMorphology: true,
+                operation: 'closing',
+                kernelSize: 2
+            },
+
+            // Alphanumeric IDs: stronger binarization + dilation for thin text
+            'curp': {
+                useBinarization: true,
+                blockSize: 31,
+                C: 3,
+                useMorphology: true,
+                operation: 'dilate',
+                kernelSize: 2
+            },
+            'clave_elector': {
+                useBinarization: true,
+                blockSize: 31,
+                C: 3,
+                useMorphology: true,
+                operation: 'dilate',
+                kernelSize: 2
+            },
+
+            // Small fields: aggressive binarization
+            'sexo': {
+                useBinarization: true,
+                blockSize: 25,
+                C: 5,
+                useMorphology: true,
+                operation: 'dilate',
+                kernelSize: 3
+            },
+            'seccion': {
+                useBinarization: true,
+                blockSize: 27,
+                C: 4,
+                useMorphology: false,
+                operation: null,
+                kernelSize: 0
+            },
+            'anio_registro': {
+                useBinarization: true,
+                blockSize: 27,
+                C: 4,
+                useMorphology: false,
+                operation: null,
+                kernelSize: 0
+            },
+
+            // Numeric codes: moderate binarization
+            'ocr_code': {
+                useBinarization: true,
+                blockSize: 29,
+                C: 3,
+                useMorphology: false,
+                operation: null,
+                kernelSize: 0
+            },
+
+            // Default: use grayscale only (Tesseract preprocessing)
+            'default': {
+                useBinarization: false,
+                blockSize: 0,
+                C: 0,
+                useMorphology: false,
+                operation: null,
+                kernelSize: 0
+            }
+        };
+
+        return configs[fieldKey] || configs['default'];
+    }
+
+    /**
+     * Alternative preprocessing with Otsu binarization for retry attempts
+     * @param {HTMLCanvasElement} canvas
+     * @param {string} fieldKey
+     * @returns {Promise<HTMLCanvasElement>}
+     */
+    async preprocessWithOtsu(canvas, fieldKey) {
+        if (typeof cv === 'undefined' || !cv.Mat) {
+            console.warn('[FieldExtractor] OpenCV not available, returning original canvas');
+            return canvas;
+        }
+
+        const src = cv.imread(canvas);
+        const gray = new cv.Mat();
+        const processed = new cv.Mat();
+
+        try {
+            // Convert to grayscale
+            cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+
+            // Apply Otsu's binarization (automatically finds optimal threshold)
+            cv.threshold(gray, processed, 0, 255, cv.THRESH_BINARY + cv.THRESH_OTSU);
+
+            // Apply morphological operations based on field type
+            const config = this.getPreprocessingConfig(fieldKey);
+
+            if (config.useMorphology) {
+                const kernel = cv.getStructuringElement(
+                    cv.MORPH_RECT,
+                    new cv.Size(config.kernelSize, config.kernelSize)
+                );
+
+                if (config.operation === 'closing') {
+                    cv.morphologyEx(processed, processed, cv.MORPH_CLOSE, kernel);
+                } else if (config.operation === 'dilate') {
+                    cv.dilate(processed, processed, kernel);
+                }
+
+                kernel.delete();
+            }
+
+            console.log(`[FieldExtractor] Applied Otsu binarization for ${fieldKey} (retry)`);
+
+            // Convert back to canvas
+            const outputCanvas = document.createElement('canvas');
+            cv.imshow(outputCanvas, processed);
+
+            src.delete();
+            gray.delete();
+            processed.delete();
+
+            return outputCanvas;
+
+        } catch (error) {
+            console.error(`[FieldExtractor] Otsu preprocessing error for ${fieldKey}:`, error);
+            src.delete();
+            gray.delete();
+            processed.delete();
+            return canvas;
+        }
     }
 
     /**
