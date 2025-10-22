@@ -176,46 +176,86 @@ class HernAI {
             this.state.detectionFront = detectionFront;
             this.state.detectionBack = detectionBack;
 
-            console.log('[HernAI] Final detection - Front:', detectionFront.confidence + '%', detectionFront.side);
-            console.log('[HernAI] Final detection - Back:', detectionBack.confidence + '%', detectionBack.side);
+            console.log('[HernAI] Initial detection - Image 1:', detectionFront.confidence + '%', detectionFront.side);
+            console.log('[HernAI] Initial detection - Image 2:', detectionBack.confidence + '%', detectionBack.side);
 
-            // CRITICAL VALIDATION: Verify that front and back are DIFFERENT sides
-            if (detectionFront.side === detectionBack.side && detectionFront.side !== 'unknown') {
+            // AUTO-CORRECT: Intercambiar imágenes si están al revés
+            let finalFrontImage = frontImage;
+            let finalBackImage = backImage;
+            let finalFrontOCR = ocrResultFront;
+            let finalBackOCR = ocrResultBack;
+            let finalFrontDetection = detectionFront;
+            let finalBackDetection = detectionBack;
+
+            // Caso 1: Primera imagen es REVERSO y segunda es ANVERSO → INTERCAMBIAR
+            if (detectionFront.side === 'back' && detectionBack.side === 'front') {
+                console.log('[HernAI] 🔄 Auto-corrigiendo: Imágenes intercambiadas (primera=reverso, segunda=anverso)');
+                finalFrontImage = backImage;
+                finalBackImage = frontImage;
+                finalFrontOCR = ocrResultBack;
+                finalBackOCR = ocrResultFront;
+                finalFrontDetection = detectionBack;
+                finalBackDetection = detectionFront;
+            }
+            // Caso 2: Ambas detectadas correctamente
+            else if (detectionFront.side === 'front' && detectionBack.side === 'back') {
+                console.log('[HernAI] ✅ Imágenes en orden correcto (primera=anverso, segunda=reverso)');
+            }
+            // Caso 3: Mismo lado 2 veces - RECHAZAR
+            else if (detectionFront.side === detectionBack.side && detectionFront.side !== 'unknown') {
                 throw new Error(
-                    `¡ERROR! Subiste el MISMO lado 2 veces. ` +
-                    `Ambas imágenes son "${detectionFront.side === 'front' ? 'ANVERSO' : 'REVERSO'}". ` +
-                    `Debes subir una imagen del ANVERSO y otra del REVERSO.`
+                    `❌ Subiste el MISMO lado 2 veces (ambas son ${detectionFront.side === 'front' ? 'ANVERSO' : 'REVERSO'}). ` +
+                    `Por favor sube UNA foto del ANVERSO y UNA del REVERSO.`
                 );
             }
+            // Caso 4: No pudimos detectar un lado - INTENTAR CONTINUAR
+            else if (detectionFront.side === 'unknown' || detectionBack.side === 'unknown') {
+                console.warn('[HernAI] ⚠️ No se pudo determinar el lado con certeza, intentando continuar...');
 
-            // Validate we have both sides detected
-            if (detectionFront.side === 'unknown' || detectionBack.side === 'unknown') {
-                const unknownSide = detectionFront.side === 'unknown' ? 'primera' : 'segunda';
-                throw new Error(
-                    `No se pudo determinar si la ${unknownSide} imagen es anverso o reverso. ` +
-                    `Asegúrate de subir fotos claras y completas de ambos lados de tu INE.`
-                );
+                // Si una es unknown pero la otra está clara, intentar inferir
+                if (detectionFront.side === 'unknown' && detectionBack.side === 'front') {
+                    // La segunda es anverso, entonces la primera debe ser reverso
+                    console.log('[HernAI] 🔄 Infiriendo: segunda=anverso, entonces primera=reverso');
+                    finalFrontImage = backImage;
+                    finalBackImage = frontImage;
+                    finalFrontOCR = ocrResultBack;
+                    finalBackOCR = ocrResultFront;
+                    finalFrontDetection = detectionBack;
+                    finalBackDetection = detectionFront;
+                } else if (detectionFront.side === 'unknown' && detectionBack.side === 'back') {
+                    // La segunda es reverso, entonces la primera debe ser anverso
+                    console.log('[HernAI] ✅ Infiriendo: segunda=reverso, entonces primera=anverso');
+                } else if (detectionFront.side === 'front' && detectionBack.side === 'unknown') {
+                    // La primera es anverso, entonces la segunda debe ser reverso
+                    console.log('[HernAI] ✅ Infiriendo: primera=anverso, entonces segunda=reverso');
+                } else if (detectionFront.side === 'back' && detectionBack.side === 'unknown') {
+                    // La primera es reverso, entonces la segunda debe ser anverso
+                    console.log('[HernAI] 🔄 Infiriendo: primera=reverso, entonces segunda=anverso');
+                    finalFrontImage = backImage;
+                    finalBackImage = frontImage;
+                    finalFrontOCR = ocrResultBack;
+                    finalBackOCR = ocrResultFront;
+                    finalFrontDetection = detectionBack;
+                    finalBackDetection = detectionFront;
+                } else {
+                    // Ambas unknown - continuar con orden original y esperar que funcione
+                    console.warn('[HernAI] ⚠️ Ambos lados desconocidos, usando orden original');
+                }
             }
 
-            // Validate we have one front and one back
-            const hasFront = detectionFront.side === 'front' || detectionBack.side === 'front';
-            const hasBack = detectionFront.side === 'back' || detectionBack.side === 'back';
+            // Actualizar state con imágenes corregidas
+            this.state.detectionFront = finalFrontDetection;
+            this.state.detectionBack = finalBackDetection;
+            this.state.ocrResultFront = finalFrontOCR;
+            this.state.ocrResultBack = finalBackOCR;
 
-            if (!hasFront || !hasBack) {
-                throw new Error(
-                    `Faltan lados de la credencial INE. ` +
-                    `Detectado: imagen 1="${detectionFront.side}", imagen 2="${detectionBack.side}". ` +
-                    `Necesitas subir UNA imagen del ANVERSO y UNA del REVERSO.`
-                );
-            }
-
-            console.log('[HernAI] ✅ Validation passed: Front and back are different sides');
+            console.log('[HernAI] ✅ Lados finales - Anverso:', finalFrontDetection.side, 'Reverso:', finalBackDetection.side);
 
             // STEP 6: Extract fields using improved extraction with layout analysis
             if (onProgress) onProgress({ stage: 'extraction', progress: 85, message: 'Extrayendo campos con IA...' });
 
-            // Use traditional extractor with all the improvements (name parsing, vigencia ranges, etc.)
-            const extractedData = this.extractor.extract(ocrResultFront.data, ocrResultBack.data);
+            // Use traditional extractor with CORRECTED images
+            const extractedData = this.extractor.extract(finalFrontOCR.data, finalBackOCR.data);
 
             // NOTE: AI extractor with layout analysis and semantic matching is also available
             // Can be used for validation or fallback: await this.aiExtractor.extract(ocrResultFront.data, ocrResultBack.data);

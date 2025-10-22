@@ -360,35 +360,80 @@ class INEDetector {
      */
     determineSide(ocrText, patternMatches) {
         const normalizedText = this.normalizeText(ocrText);
+        let frontScore = 0;
+        let backScore = 0;
 
-        // Front side indicators
-        const frontIndicators = [
-            'NOMBRE',
-            'DOMICILIO',
-            'FOTOGRAFIA',
-            normalizedText.includes('CURP') && patternMatches.CURP,
-            normalizedText.includes('CLAVE') && !normalizedText.includes('ELECTOR')
-        ];
+        // CRITICAL: OCR code (13 dígitos) SOLO está en reverso
+        if (patternMatches.OCR && patternMatches.OCR.length > 0) {
+            backScore += 50;  // Peso MUY alto - es indicador definitivo de reverso
+            console.log('[INE-Detector] OCR code found → REVERSO');
+        }
 
-        // Back side indicators
-        const backIndicators = [
-            'CLAVE DE ELECTOR',
-            'CLAVE ELECTOR',
-            'VIGENCIA',
-            'EMISION',
-            'REGISTRO FEDERAL',
-            patternMatches.CLAVE_ELECTOR,
-            patternMatches.OCR && patternMatches.OCR.length > 0
-        ];
+        // CRITICAL: Clave Elector está SOLO en reverso
+        if (patternMatches.CLAVE_ELECTOR) {
+            backScore += 40;
+            console.log('[INE-Detector] Clave Elector found → REVERSO');
+        }
 
-        const frontScore = frontIndicators.filter(Boolean).length;
-        const backScore = backIndicators.filter(Boolean).length;
+        // Reverso: Keywords
+        if (normalizedText.includes('VIGENCIA')) {
+            backScore += 15;
+        }
+        if (normalizedText.includes('EMISION')) {
+            backScore += 15;
+        }
+        if (normalizedText.includes('REGISTRO')) {
+            backScore += 10;
+        }
 
-        if (frontScore > backScore) {
+        // CRITICAL: CURP puede estar en anverso o reverso dependiendo del modelo
+        // Pero DOMICILIO solo está en anverso
+        if (normalizedText.includes('DOMICILIO') || normalizedText.includes('DIRECCION')) {
+            frontScore += 40;
+            console.log('[INE-Detector] DOMICILIO found → ANVERSO');
+        }
+
+        // Anverso: Keywords
+        if (normalizedText.includes('NOMBRE')) {
+            frontScore += 20;
+        }
+        if (normalizedText.includes('APELLIDO')) {
+            frontScore += 20;
+        }
+        if (normalizedText.includes('SEXO')) {
+            frontScore += 15;
+        }
+        if (normalizedText.includes('EDAD')) {
+            frontScore += 15;
+        }
+
+        // Si tiene CURP pero no tiene OCR ni Clave Elector, probablemente es anverso
+        if (patternMatches.CURP && !patternMatches.OCR && !patternMatches.CLAVE_ELECTOR) {
+            frontScore += 20;
+        }
+
+        console.log(`[INE-Detector] Side scores - Front: ${frontScore}, Back: ${backScore}`);
+
+        // Decidir con umbral mínimo
+        if (frontScore > backScore && frontScore >= 20) {
             return 'front';
-        } else if (backScore > frontScore) {
+        } else if (backScore > frontScore && backScore >= 20) {
             return 'back';
         }
+
+        // Si no podemos decidir, retornar 'unknown' pero con más info
+        console.warn('[INE-Detector] Cannot determine side confidently', {
+            frontScore,
+            backScore,
+            hasOCR: !!patternMatches.OCR,
+            hasClave: !!patternMatches.CLAVE_ELECTOR,
+            hasCURP: !!patternMatches.CURP
+        });
+
+        // Si tiene OCR, es definitivamente reverso
+        if (patternMatches.OCR) return 'back';
+        // Si tiene DOMICILIO, es definitivamente anverso
+        if (normalizedText.includes('DOMICILIO')) return 'front';
 
         return 'unknown';
     }
