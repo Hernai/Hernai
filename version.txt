@@ -1,4 +1,4 @@
-pending
+35a4611
 2025-10-22T08:15:00Z
 All fixes applied including:
 - CardDetector fallback normalization
