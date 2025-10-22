@@ -369,6 +369,204 @@ class INEValidators {
         if (!clave || clave.length !== 18) return clave;
         return `${clave.substring(0, 6)}-${clave.substring(6, 14)}-${clave.substring(14)}`;
     }
+
+    /**
+     * Validate MRZ (Machine Readable Zone) - OCR-B format
+     * Format: A-Z, 0-9, < characters
+     */
+    static validateMRZ(mrz) {
+        if (!mrz || typeof mrz !== 'string') {
+            return { valid: false, error: 'MRZ vacío o inválido' };
+        }
+
+        mrz = mrz.toUpperCase().trim();
+
+        // MRZ debe contener solo A-Z, 0-9 y <
+        if (!/^[A-Z0-9<]+$/.test(mrz)) {
+            return { valid: false, error: 'MRZ contiene caracteres inválidos' };
+        }
+
+        // MRZ típico de INE tiene longitud mínima
+        if (mrz.length < 30) {
+            return { valid: false, error: 'MRZ demasiado corto' };
+        }
+
+        return { valid: true };
+    }
+
+    /**
+     * Validate Sección (electoral section)
+     * Format: 4 digits
+     */
+    static validateSeccion(seccion) {
+        if (!seccion || typeof seccion !== 'string') {
+            return { valid: false, error: 'Sección vacía o inválida' };
+        }
+
+        seccion = seccion.trim();
+
+        // Check format: 4 digits
+        if (!/^\d{4}$/.test(seccion)) {
+            return { valid: false, error: 'Sección debe tener 4 dígitos' };
+        }
+
+        // Check not all zeros
+        if (seccion === '0000') {
+            return { valid: false, error: 'Sección no puede ser 0000' };
+        }
+
+        return { valid: true };
+    }
+
+    /**
+     * Validate Fecha (date in dd/mm/yyyy format)
+     * Format: DD/MM/YYYY
+     */
+    static validateFecha(fecha) {
+        if (!fecha || typeof fecha !== 'string') {
+            return { valid: false, error: 'Fecha vacía o inválida' };
+        }
+
+        fecha = fecha.trim();
+
+        // Check format: dd/mm/yyyy
+        const pattern = /^([0-2]\d|3[01])\/(0\d|1[0-2])\/(\d{4})$/;
+        const match = fecha.match(pattern);
+
+        if (!match) {
+            return { valid: false, error: 'Formato de fecha debe ser DD/MM/YYYY' };
+        }
+
+        const day = parseInt(match[1]);
+        const month = parseInt(match[2]);
+        const year = parseInt(match[3]);
+
+        // Validate date is real
+        const date = new Date(year, month - 1, day);
+        if (date.getMonth() + 1 !== month || date.getDate() !== day) {
+            return { valid: false, error: 'Fecha inválida' };
+        }
+
+        // Check reasonable year range
+        const currentYear = new Date().getFullYear();
+        if (year < 1900 || year > currentYear) {
+            return { valid: false, error: 'Año fuera de rango válido' };
+        }
+
+        return { valid: true, data: { day, month, year, date } };
+    }
+
+    /**
+     * Validate Vigencia (validity period)
+     * Format: YYYY-YYYY or "VIGENCIA HASTA YYYY"
+     */
+    static validateVigencia(vigencia) {
+        if (!vigencia || typeof vigencia !== 'string') {
+            return { valid: false, error: 'Vigencia vacía o inválida' };
+        }
+
+        vigencia = vigencia.toUpperCase().trim();
+
+        // Pattern 1: YYYY-YYYY or YYYY/YYYY
+        const pattern1 = /^(\d{4})\s*[-\/]\s*(\d{4})$/;
+        const match1 = vigencia.match(pattern1);
+
+        if (match1) {
+            const startYear = parseInt(match1[1]);
+            const endYear = parseInt(match1[2]);
+
+            if (endYear <= startYear) {
+                return { valid: false, error: 'Año final debe ser mayor que inicial' };
+            }
+
+            return { valid: true, data: { startYear, endYear, format: 'range' } };
+        }
+
+        // Pattern 2: VIGENCIA HASTA YYYY
+        const pattern2 = /VIGENCIA\s+HASTA\s+(\d{4})/;
+        const match2 = vigencia.match(pattern2);
+
+        if (match2) {
+            const endYear = parseInt(match2[1]);
+            return { valid: true, data: { endYear, format: 'until' } };
+        }
+
+        return { valid: false, error: 'Formato de vigencia inválido (use YYYY-YYYY o VIGENCIA HASTA YYYY)' };
+    }
+
+    /**
+     * Validate consistency between CURP and fecha_nacimiento
+     * CURP positions 5-10 should match birth date YYMMDD
+     */
+    static validateCURPFechaConsistency(curp, fechaNacimiento) {
+        if (!curp || !fechaNacimiento) {
+            return { valid: true, warning: 'Campos faltantes para validación cruzada' };
+        }
+
+        // Extract date from CURP (positions 4-10: YYMMDD)
+        const curpYear = parseInt(curp.substring(4, 6));
+        const curpMonth = parseInt(curp.substring(6, 8));
+        const curpDay = parseInt(curp.substring(8, 10));
+
+        // Parse fecha_nacimiento
+        let birthDay, birthMonth, birthYear;
+
+        if (typeof fechaNacimiento === 'string') {
+            // Try DD/MM/YYYY format
+            const match = fechaNacimiento.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+            if (match) {
+                birthDay = parseInt(match[1]);
+                birthMonth = parseInt(match[2]);
+                birthYear = parseInt(match[3]);
+            } else {
+                return { valid: false, error: 'Formato de fecha de nacimiento no reconocido' };
+            }
+        } else if (fechaNacimiento instanceof Date) {
+            birthDay = fechaNacimiento.getDate();
+            birthMonth = fechaNacimiento.getMonth() + 1;
+            birthYear = fechaNacimiento.getFullYear();
+        } else {
+            return { valid: false, error: 'Tipo de fecha de nacimiento no soportado' };
+        }
+
+        // Convert CURP year to full year
+        const curpFullYear = curpYear > 50 ? 1900 + curpYear : 2000 + curpYear;
+
+        // Compare
+        if (curpFullYear !== birthYear || curpMonth !== birthMonth || curpDay !== birthDay) {
+            return {
+                valid: false,
+                error: `Fecha en CURP (${curpDay}/${curpMonth}/${curpFullYear}) no coincide con fecha_nacimiento (${birthDay}/${birthMonth}/${birthYear})`
+            };
+        }
+
+        return { valid: true };
+    }
+
+    /**
+     * Normalize vigencia to YYYY-YYYY format
+     */
+    static normalizeVigencia(vigencia) {
+        if (!vigencia) return null;
+
+        vigencia = vigencia.toUpperCase().trim();
+
+        // Already in YYYY-YYYY format
+        const rangeMatch = vigencia.match(/^(\d{4})\s*[-\/]\s*(\d{4})$/);
+        if (rangeMatch) {
+            return `${rangeMatch[1]}-${rangeMatch[2]}`;
+        }
+
+        // VIGENCIA HASTA YYYY format - estimate start year
+        const untilMatch = vigencia.match(/VIGENCIA\s+HASTA\s+(\d{4})/);
+        if (untilMatch) {
+            const endYear = parseInt(untilMatch[1]);
+            const startYear = endYear - 10; // INE típicamente válida 10 años
+            return `${startYear}-${endYear}`;
+        }
+
+        return vigencia; // Return as-is if can't normalize
+    }
 }
 
 // Export for use in other modules
