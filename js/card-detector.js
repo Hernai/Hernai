@@ -9,12 +9,13 @@ class CardDetector {
         this.isOpenCVReady = false;
 
         // Dimensiones estándar de credencial INE (mm)
-        // Ratio: 85.6mm x 54mm = 1.585 aprox
+        // ID-1 format: 85.6mm x 53.98mm ≈ 1.586 ratio
         this.standardRatio = 1.585;
 
-        // Dimensiones de salida (pixels)
-        this.outputWidth = 1200;
-        this.outputHeight = Math.round(this.outputWidth / this.standardRatio); // ~757px
+        // Dimensiones de salida EXACTAS (pixels) según especificación
+        // IMPORTANTE: SIEMPRE 1012×638px para normalización
+        this.outputWidth = 1012;
+        this.outputHeight = 638;
     }
 
     /**
@@ -93,12 +94,14 @@ class CardDetector {
             src.delete();
             extracted.delete();
 
-            console.log('[CardDetector] ✅ Card detected and extracted successfully');
+            console.log(`[CardDetector] ✅ Card detected and extracted (${this.outputWidth}×${this.outputHeight}px)`);
 
             return {
                 success: true,
                 image: outputCanvas,
                 dataURL: outputCanvas.toDataURL('image/png'),
+                width: this.outputWidth,
+                height: this.outputHeight,
                 corners: corners,
                 method: 'opencv_card_detection'
             };

@@ -342,40 +342,48 @@ class ImageProcessor {
     }
 
     /**
-     * Enhance contrast and brightness
+     * Enhance contrast using CLAHE on L channel (LAB color space)
+     * Spec: clipLimit=2.0, tileGridSize=8×8
      */
     async enhanceContrast(canvas) {
-        console.log('[ImageProcessor] Enhancing contrast with aggressive CLAHE...');
+        console.log('[ImageProcessor] Enhancing contrast with CLAHE (LAB, L-channel)...');
 
         if (this.isOpenCVReady) {
             try {
                 const src = cv.imread(canvas);
-                const gray = new cv.Mat();
-                const clahed = new cv.Mat();
-                const enhanced = new cv.Mat();
+                const lab = new cv.Mat();
+                const channels = new cv.MatVector();
 
-                // Convert to grayscale
-                cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+                // Convert RGB → LAB
+                cv.cvtColor(src, lab, cv.COLOR_RGBA2Lab);
 
-                // Apply CLAHE with AGGRESSIVE parameters for better character separation
-                // clipLimit 4.0 = más contraste, tileGridSize 4x4 = más local/preciso
-                const clahe = new cv.CLAHE(4.0, new cv.Size(4, 4));
-                clahe.apply(gray, clahed);
+                // Split LAB channels
+                cv.split(lab, channels);
 
-                // Additional contrast stretching to maximize black/white separation
-                cv.normalize(clahed, enhanced, 0, 255, cv.NORM_MINMAX);
+                // Apply CLAHE ONLY on L channel (lightness)
+                // Spec: clipLimit=2.0, tileGridSize=8×8
+                const clahe = new cv.CLAHE(2.0, new cv.Size(8, 8));
+                const lChannel = channels.get(0);
+                clahe.apply(lChannel, lChannel);
+
+                // Merge channels back
+                cv.merge(channels, lab);
+
+                // Convert LAB → RGB
+                const result = new cv.Mat();
+                cv.cvtColor(lab, result, cv.COLOR_Lab2RGBA);
 
                 const outputCanvas = document.createElement('canvas');
-                cv.imshow(outputCanvas, enhanced);
+                cv.imshow(outputCanvas, result);
 
                 src.delete();
-                gray.delete();
-                clahed.delete();
-                enhanced.delete();
+                lab.delete();
+                channels.delete();
+                result.delete();
 
                 return outputCanvas;
             } catch (error) {
-                console.error('[ImageProcessor] CLAHE failed, using fallback:', error);
+                console.error('[ImageProcessor] CLAHE (LAB) failed, using fallback:', error);
             }
         }
 
@@ -399,21 +407,23 @@ class ImageProcessor {
     }
 
     /**
-     * Denoise image
+     * Denoise image using fastNlMeansDenoisingColored
+     * Spec: ligero (h=10, hColor=10, templateWindowSize=7, searchWindowSize=21)
      */
     async denoise(canvas) {
         if (!this.isOpenCVReady) {
             return canvas;
         }
 
-        console.log('[ImageProcessor] Denoising...');
+        console.log('[ImageProcessor] Denoising with fastNlMeansDenoisingColored...');
 
         try {
             const src = cv.imread(canvas);
             const dst = new cv.Mat();
 
-            // Apply Non-Local Means Denoising
-            cv.fastNlMeansDenoising(src, dst, 10, 7, 21);
+            // Apply Non-Local Means Denoising for COLOR images
+            // Parámetros: (src, dst, h, hColor, templateWindowSize, searchWindowSize)
+            cv.fastNlMeansDenoisingColored(src, dst, 10, 10, 7, 21);
 
             const outputCanvas = document.createElement('canvas');
             cv.imshow(outputCanvas, dst);
@@ -588,6 +598,67 @@ class ImageProcessor {
     }
 
     /**
+     * Correct EXIF rotation metadata
+     * Lee metadatos EXIF y aplica rotación automática
+     */
+    async correctEXIFRotation(canvas) {
+        // NOTA: En navegadores modernos, los navegadores ya auto-rotan
+        // basado en EXIF cuando se carga la imagen
+        // Este método es un placeholder por si se requiere procesamiento manual
+
+        console.log('[ImageProcessor] EXIF rotation check (browser handles this automatically)');
+        return canvas;
+    }
+
+    /**
+     * Apply Gray-World white balance
+     * Algoritmo simple: igualar promedios RGB a gris neutro
+     */
+    applyGrayWorldWhiteBalance(src) {
+        if (!this.isOpenCVReady) {
+            return;
+        }
+
+        console.log('[ImageProcessor] Applying Gray-World white balance...');
+
+        try {
+            // Split into channels
+            const channels = new cv.MatVector();
+            cv.split(src, channels);
+
+            // Calculate mean for each channel
+            const meanB = cv.mean(channels.get(0))[0];
+            const meanG = cv.mean(channels.get(1))[0];
+            const meanR = cv.mean(channels.get(2))[0];
+
+            // Calculate gray average
+            const avgGray = (meanB + meanG + meanR) / 3;
+
+            // Calculate scaling factors
+            const scaleB = avgGray / meanB;
+            const scaleG = avgGray / meanG;
+            const scaleR = avgGray / meanR;
+
+            console.log(`[ImageProcessor] WB scales: R=${scaleR.toFixed(2)}, G=${scaleG.toFixed(2)}, B=${scaleB.toFixed(2)}`);
+
+            // Apply scaling to each channel
+            channels.get(0).convertTo(channels.get(0), -1, scaleB, 0);  // B
+            channels.get(1).convertTo(channels.get(1), -1, scaleG, 0);  // G
+            channels.get(2).convertTo(channels.get(2), -1, scaleR, 0);  // R
+
+            // Merge back
+            cv.merge(channels, src);
+
+            channels.delete();
+
+            console.log('[ImageProcessor] ✅ Gray-World white balance applied');
+
+        } catch (error) {
+            console.error('[ImageProcessor] White balance failed:', error);
+        }
+    }
+
+    /**
      * Process specifically for INE credentials with all advanced techniques
      */
     async processForINE(imageSource) {
@@ -598,6 +669,9 @@ class ImageProcessor {
             // Load image
             const image = await this.loadImage(imageSource);
             let processedCanvas = this.imageToCanvas(image);
+
+            // STEP 0a: EXIF Rotation correction
+            processedCanvas = await this.correctEXIFRotation(processedCanvas);
 
             // STEP 0: CARD DETECTION - Extract card region FIRST (excluding background, hands, etc.)
             if (this.config.autoCardDetection && this.isOpenCVReady) {
@@ -645,6 +719,16 @@ class ImageProcessor {
             // Step 6: Denoise - ONLY on text regions
             if (this.isOpenCVReady) {
                 processedCanvas = await this.denoise(processedCanvas);
+            }
+
+            // Step 6b: Gray-World white balance
+            if (this.isOpenCVReady) {
+                const src = cv.imread(processedCanvas);
+                this.applyGrayWorldWhiteBalance(src);
+                const wbCanvas = document.createElement('canvas');
+                cv.imshow(wbCanvas, src);
+                processedCanvas = wbCanvas;
+                src.delete();
             }
 
             // Step 7: Sharpen text - ONLY on text regions
