@@ -7,6 +7,8 @@ class OCREngine {
     constructor() {
         this.tesseractWorker = null;
         this.transformersModel = null;
+        this.zxingReader = null;
+        this.zxingReady = false;
         this.isInitialized = false;
         this.config = {
             tesseract: {
@@ -383,6 +385,280 @@ class OCREngine {
 
         this.isInitialized = false;
         console.log('[OCR] OCR engines terminated');
+    }
+
+    /**
+     * Initialize ZXing for QR code detection
+     */
+    async initializeZXing() {
+        if (this.zxingReady) {
+            console.log('[OCR] ZXing already initialized');
+            return;
+        }
+
+        console.log('[OCR] Initializing ZXing for QR detection...');
+
+        try {
+            // Intentar cargar ZXing desde assets locales o CDN
+            if (typeof ZXing === 'undefined') {
+                console.log('[OCR] ZXing not loaded, attempting to load from CDN...');
+                await this.loadZXingFromCDN();
+            }
+
+            // Crear reader multi-formato (QR, DataMatrix, etc.)
+            if (typeof ZXing !== 'undefined' && ZXing.BrowserMultiFormatReader) {
+                this.zxingReader = new ZXing.BrowserMultiFormatReader();
+                this.zxingReady = true;
+                console.log('[OCR] ✅ ZXing initialized successfully');
+            } else {
+                console.warn('[OCR] ⚠️ ZXing not available, QR detection disabled');
+            }
+        } catch (error) {
+            console.error('[OCR] ZXing initialization failed:', error);
+            console.warn('[OCR] Continuing without QR detection');
+        }
+    }
+
+    /**
+     * Load ZXing from CDN
+     */
+    async loadZXingFromCDN() {
+        return new Promise((resolve, reject) => {
+            const script = document.createElement('script');
+            script.src = 'https://cdn.jsdelivr.net/npm/@zxing/library@latest/umd/index.min.js';
+            script.onload = () => {
+                console.log('[OCR] ZXing loaded from CDN');
+                resolve();
+            };
+            script.onerror = () => {
+                reject(new Error('Failed to load ZXing from CDN'));
+            };
+            document.head.appendChild(script);
+        });
+    }
+
+    /**
+     * Detect QR codes in image (up to 3 codes)
+     * @param {HTMLImageElement|HTMLCanvasElement|string} imageSource
+     * @returns {Promise<Array<{index: number, text: string, format: string, ok: boolean}>>}
+     */
+    async detectQRCodes(imageSource) {
+        if (!this.zxingReady) {
+            await this.initializeZXing();
+        }
+
+        if (!this.zxingReady) {
+            console.warn('[OCR] ZXing not available, returning empty QR list');
+            return [];
+        }
+
+        console.log('[OCR] Detecting QR codes...');
+        const qrCodes = [];
+
+        try {
+            // Convertir a elemento de imagen si es necesario
+            let imageElement = imageSource;
+            if (typeof imageSource === 'string') {
+                imageElement = await this.loadImage(imageSource);
+            } else if (imageSource instanceof HTMLCanvasElement) {
+                imageElement = await this.canvasToImage(imageSource);
+            }
+
+            // Decodificar (ZXing puede detectar múltiples códigos)
+            try {
+                const result = await this.zxingReader.decodeFromImageElement(imageElement);
+                if (result) {
+                    qrCodes.push({
+                        index: 0,
+                        text: result.getText(),
+                        format: result.getBarcodeFormat(),
+                        ok: true
+                    });
+                    console.log(`[OCR] ✅ QR code detected: ${result.getText().substring(0, 50)}...`);
+                }
+            } catch (err) {
+                // No QR encontrado, esto es normal
+                console.log('[OCR] No QR codes detected in image');
+            }
+
+            // TODO: Para detectar múltiples QR codes, se necesitaría escanear diferentes regiones
+            // Por ahora retornamos el primero encontrado
+
+        } catch (error) {
+            console.error('[OCR] QR detection error:', error);
+        }
+
+        return qrCodes;
+    }
+
+    /**
+     * Get OCR whitelist for specific field type
+     * @param {string} fieldType - Type of field (sexo, clave_elector, curp, seccion, etc.)
+     * @returns {string} Whitelist characters
+     */
+    getWhitelist(fieldType) {
+        const whitelists = {
+            sexo: 'HM',
+            clave_elector: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-/',
+            curp: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-/',
+            seccion: '0123456789',
+            anio_registro: '0123456789',
+            vigencia: '0123456789-/',
+            mrz: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789<',
+            ocr_code: '0123456789',
+            general: '' // Sin whitelist
+        };
+
+        return whitelists[fieldType] || '';
+    }
+
+    /**
+     * Recognize text with field-specific whitelist
+     * @param {*} imageData
+     * @param {Object} options - {fieldType, psm, useAI, ...}
+     * @returns {Promise<{text: string, confidence: number, method: string}>}
+     */
+    async recognizeWithWhitelist(imageData, options = {}) {
+        const fieldType = options.fieldType || 'general';
+        const psm = options.psm || 6; // Default: Assume uniform block of text
+        const whitelist = this.getWhitelist(fieldType);
+
+        console.log(`[OCR] Recognizing field type '${fieldType}' with whitelist: ${whitelist ? whitelist.substring(0, 20) + '...' : 'none'}`);
+
+        // Configurar whitelist si se especificó
+        if (whitelist) {
+            await this.tesseractWorker.setParameters({
+                tessedit_char_whitelist: whitelist,
+                tessedit_pageseg_mode: psm
+            });
+        } else {
+            await this.tesseractWorker.setParameters({
+                tessedit_pageseg_mode: psm
+            });
+        }
+
+        // Procesar imagen (upscale si es pequeña)
+        let processedImage = imageData;
+        if (imageData instanceof HTMLCanvasElement) {
+            const canvas = imageData;
+            if (canvas.width < 200 || canvas.height < 50) {
+                console.log(`[OCR] Image too small (${canvas.width}×${canvas.height}), upscaling x2...`);
+                processedImage = this.upscaleCanvas(canvas, 2);
+            }
+        }
+
+        // Ejecutar OCR
+        const result = await this.recognize(processedImage, options);
+
+        // Restaurar configuración por defecto
+        if (whitelist) {
+            await this.tesseractWorker.setParameters({
+                tessedit_char_whitelist: 'ABCDEFGHIJKLMNÑOPQRSTUVWXYZÁÉÍÓÚabcdefghijklmnñopqrstuvwxyzáéíóú0123456789 .,-/'
+            });
+        }
+
+        return result;
+    }
+
+    /**
+     * Recognize MRZ (Machine Readable Zone) with OCR-B trained data
+     * @param {*} imageSource - Image containing MRZ
+     * @returns {Promise<{text: string, confidence: number, method: string}>}
+     */
+    async recognizeOCRB(imageSource) {
+        console.log('[OCR] Recognizing MRZ with OCR-B...');
+
+        try {
+            // Intentar usar OCR-B trained data si está disponible
+            try {
+                await this.tesseractWorker.loadLanguage('ocrb');
+                await this.tesseractWorker.initialize('ocrb');
+                console.log('[OCR] ✅ OCR-B language loaded');
+            } catch (err) {
+                console.warn('[OCR] ⚠️ OCR-B not available, using eng with MRZ whitelist');
+                await this.tesseractWorker.loadLanguage('eng');
+                await this.tesseractWorker.initialize('eng');
+            }
+
+            // Configurar para MRZ
+            await this.tesseractWorker.setParameters({
+                tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789<',
+                tessedit_pageseg_mode: 7, // Treat image as single text line
+                preserve_interword_spaces: '0' // MRZ no tiene espacios
+            });
+
+            // Ejecutar OCR
+            const { data } = await this.tesseractWorker.recognize(imageSource);
+
+            // Restaurar a español
+            await this.tesseractWorker.loadLanguage('spa');
+            await this.tesseractWorker.initialize('spa');
+            await this.tesseractWorker.setParameters({
+                tessedit_char_whitelist: 'ABCDEFGHIJKLMNÑOPQRSTUVWXYZÁÉÍÓÚabcdefghijklmnñopqrstuvwxyzáéíóú0123456789 .,-/',
+                tessedit_pageseg_mode: this.config.tesseract.psm
+            });
+
+            return {
+                text: data.text.trim(),
+                confidence: data.confidence || 0,
+                method: 'tesseract_ocrb'
+            };
+
+        } catch (error) {
+            console.error('[OCR] MRZ recognition failed:', error);
+            return { text: '', confidence: 0, method: 'failed' };
+        }
+    }
+
+    /**
+     * Upscale canvas using INTER_CUBIC interpolation
+     * @param {HTMLCanvasElement} canvas
+     * @param {number} factor - Scale factor (e.g., 2 for 2x)
+     * @returns {HTMLCanvasElement}
+     */
+    upscaleCanvas(canvas, factor) {
+        const newCanvas = document.createElement('canvas');
+        newCanvas.width = canvas.width * factor;
+        newCanvas.height = canvas.height * factor;
+
+        const ctx = newCanvas.getContext('2d');
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high'; // Cubic interpolation
+        ctx.drawImage(canvas, 0, 0, newCanvas.width, newCanvas.height);
+
+        console.log(`[OCR] Upscaled ${canvas.width}×${canvas.height} → ${newCanvas.width}×${newCanvas.height}`);
+        return newCanvas;
+    }
+
+    /**
+     * Helper: Convert canvas to image element
+     */
+    canvasToImage(canvas) {
+        return new Promise((resolve, reject) => {
+            const img = new Image();
+            img.onload = () => resolve(img);
+            img.onerror = reject;
+            img.src = canvas.toDataURL('image/png');
+        });
+    }
+
+    /**
+     * Helper: Load image from source
+     */
+    loadImage(source) {
+        return new Promise((resolve, reject) => {
+            const img = new Image();
+            img.onload = () => resolve(img);
+            img.onerror = reject;
+
+            if (typeof source === 'string') {
+                img.src = source;
+            } else if (source instanceof Blob) {
+                img.src = URL.createObjectURL(source);
+            } else {
+                reject(new Error('Unsupported image source'));
+            }
+        });
     }
 }
 
