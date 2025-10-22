@@ -308,6 +308,151 @@ class OCRCorrector {
 
         return null;
     }
+
+    /**
+     * Fix common OCR confusions (0↔O, 1↔I, 5↔S, 8↔B) based on field type
+     * Public method for explicit confusion fixing
+     *
+     * @param {string} text - Text to correct
+     * @param {string} fieldType - 'alphanumeric_id', 'numeric_id', or 'text'
+     * @returns {string} Corrected text
+     */
+    fixOcrConfusions(text, fieldType) {
+        if (!text) return '';
+
+        let corrected = text;
+
+        if (fieldType === 'alphanumeric_id') {
+            // Position-based correction for CURP/Clave Elector
+            // First 4 chars: letters, positions 4-9: numbers (date)
+            const chars = text.split('');
+            corrected = chars.map((char, i) => {
+                if (i < 4) {
+                    // Should be letters
+                    if (char === '0') return 'O';
+                    if (char === '1') return 'I';
+                    if (char === '5') return 'S';
+                    if (char === '8') return 'B';
+                } else if (i >= 4 && i < 10) {
+                    // Should be numbers (date: YYMMDD)
+                    if (char === 'O' || char === 'o') return '0';
+                    if (char === 'I' || char === 'i' || char === 'l') return '1';
+                    if (char === 'S') return '5';
+                    if (char === 'B') return '8';
+                    if (char === 'Z') return '2';
+                }
+                return char;
+            }).join('');
+
+        } else if (fieldType === 'numeric_id') {
+            // All should be numbers (OCR code, section, postal code)
+            corrected = text.split('').map(char => {
+                if (char === 'O' || char === 'o') return '0';
+                if (char === 'I' || char === 'i' || char === 'l') return '1';
+                if (char === 'S') return '5';
+                if (char === 'B') return '8';
+                if (char === 'Z') return '2';
+                return char;
+            }).join('');
+
+        } else if (fieldType === 'text') {
+            // Letters preferred (names, addresses)
+            corrected = text.split('').map(char => {
+                if (char === '0') return 'O';
+                if (char === '1') return 'I';
+                if (char === '5') return 'S';
+                if (char === '8') return 'B';
+                return char;
+            }).join('');
+        }
+
+        return corrected;
+    }
+
+    /**
+     * Calculate similarity between two strings (0.0 to 1.0)
+     * 1.0 = identical, 0.0 = completely different
+     *
+     * @param {string} str1 - First string
+     * @param {string} str2 - Second string
+     * @returns {number} Similarity score (0.0 - 1.0)
+     */
+    levenshteinSimilarity(str1, str2) {
+        if (!str1 || !str2) return 0;
+        if (str1 === str2) return 1.0;
+
+        const distance = this.levenshteinDistance(str1, str2);
+        const maxLen = Math.max(str1.length, str2.length);
+
+        return maxLen === 0 ? 1.0 : 1.0 - (distance / maxLen);
+    }
+
+    /**
+     * Merge QR code data with OCR-extracted fields
+     * Resolves conflicts by preferring higher confidence or higher similarity
+     *
+     * @param {Object} ocrData - OCR extracted fields {fieldName: {value, confidence, bbox, source}}
+     * @param {Array} qrPayloads - QR code payloads [{index, text, format, ok}]
+     * @returns {Object} Merged field data
+     */
+    mergeQRAndOCR(ocrData, qrPayloads) {
+        if (!qrPayloads || qrPayloads.length === 0) {
+            return ocrData;
+        }
+
+        const merged = { ...ocrData };
+
+        for (const qr of qrPayloads) {
+            if (!qr.ok) continue;
+
+            try {
+                // Try to parse QR as JSON
+                const qrData = JSON.parse(qr.text);
+
+                for (const [key, value] of Object.entries(qrData)) {
+                    const normalizedKey = key.toLowerCase().replace(/_/g, '_');
+
+                    if (merged[normalizedKey]) {
+                        // Field exists in both OCR and QR - compare
+                        const ocrValue = merged[normalizedKey].value;
+                        const similarity = this.levenshteinSimilarity(ocrValue, value);
+
+                        console.log(`[OCRCorrector] QR vs OCR for ${normalizedKey}: similarity=${similarity.toFixed(2)}`);
+
+                        if (similarity >= 0.90) {
+                            // High similarity - boost OCR confidence
+                            merged[normalizedKey].confidence = Math.min(100, merged[normalizedKey].confidence + 15);
+                            merged[normalizedKey].source = 'ocr+qr';
+                            console.log(`[OCRCorrector] Boosted confidence for ${normalizedKey} to ${merged[normalizedKey].confidence}`);
+
+                        } else if (merged[normalizedKey].confidence < 75) {
+                            // Low OCR confidence - replace with QR
+                            merged[normalizedKey].value = value;
+                            merged[normalizedKey].confidence = 95;
+                            merged[normalizedKey].source = 'qr';
+                            console.log(`[OCRCorrector] Replaced ${normalizedKey} with QR value`);
+                        }
+
+                    } else {
+                        // Field only in QR - add it
+                        merged[normalizedKey] = {
+                            value: value,
+                            confidence: 95,
+                            bbox: [0, 0, 0, 0],
+                            source: 'qr'
+                        };
+                        console.log(`[OCRCorrector] Added QR-only field: ${normalizedKey}`);
+                    }
+                }
+
+            } catch (e) {
+                // QR is not JSON - could be raw text or barcode
+                console.log('[OCRCorrector] QR not JSON format:', qr.text.substring(0, 50));
+            }
+        }
+
+        return merged;
+    }
 }
 
 // Export for use in other modules

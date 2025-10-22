@@ -1201,6 +1201,316 @@ class FieldExtractor {
         return recommendations;
     }
 
+    // ========================================================================
+    // NEW METHODS: Region-based extraction with bbox (Browser-only spec)
+    // ========================================================================
+
+    /**
+     * Extract a specific field from canvas using layout regions
+     * Returns: {value, confidence, bbox, source}
+     *
+     * @param {string} fieldKey - Field identifier (nombre, curp, etc.)
+     * @param {HTMLCanvasElement} canvas - Preprocessed canvas (1012×638px)
+     * @param {Object} ocr - OCREngine instance
+     * @param {Object} layout - Layout instance
+     * @param {string} model - INE model (INE_2019, INE_2023, INE_v3_1)
+     * @param {string} side - 'front' or 'back'
+     * @param {number} W - Canvas width (1012)
+     * @param {number} H - Canvas height (638)
+     * @returns {Promise<Object>} {value, confidence, bbox: [x,y,w,h], source}
+     */
+    async extractFieldWithBbox(fieldKey, canvas, ocr, layout, model, side, W = 1012, H = 638) {
+        try {
+            // 1. Get region from layout
+            const region = layout.getRegion(model, side, fieldKey, W, H);
+
+            if (!region || region.w === 0 || region.h === 0) {
+                console.warn(`[FieldExtractor] No region defined for ${fieldKey} in ${model} ${side}`);
+                return {
+                    value: '',
+                    confidence: 0,
+                    bbox: [0, 0, 0, 0],
+                    source: 'ocr'
+                };
+            }
+
+            // 2. Crop canvas region
+            const croppedCanvas = this.cropRegion(canvas, region);
+
+            // 3. Get field type for whitelist
+            const fieldType = this.getFieldType(fieldKey);
+
+            // 4. Run OCR with field-specific whitelist and PSM
+            let psm = 7; // Single line default
+            if (fieldKey === 'nombre' || fieldKey === 'domicilio') {
+                psm = 6; // Block of text
+            } else if (fieldKey === 'mrz') {
+                // Use OCRB for MRZ
+                const mrzResult = await ocr.recognizeOCRB(croppedCanvas);
+                const cleanedMRZ = mrzResult.text.replace(/\s/g, '').toUpperCase();
+
+                return {
+                    value: cleanedMRZ,
+                    confidence: Math.min(100, mrzResult.confidence),
+                    bbox: [region.x, region.y, region.w, region.h],
+                    source: 'ocr'
+                };
+            }
+
+            const result = await ocr.recognizeWithWhitelist(croppedCanvas, {
+                fieldType: fieldType,
+                psm: psm
+            });
+
+            // 5. Normalize and correct using OCRCorrector
+            let value = result.text.trim().toUpperCase();
+
+            // Apply field-specific corrections
+            if (fieldType === 'alphanumeric_id') {
+                value = this.ocrCorrector.fixOcrConfusions(value, 'alphanumeric_id');
+            } else if (fieldType === 'numeric_id') {
+                value = this.ocrCorrector.fixOcrConfusions(value, 'numeric_id');
+            } else {
+                value = this.ocrCorrector.correctText(value, { type: fieldType });
+            }
+
+            // 6. Validate field
+            const validation = this.validateFieldValue(fieldKey, value);
+
+            // 7. Boost confidence if validation passes
+            let confidence = result.confidence || 0;
+            if (validation.valid) {
+                confidence = Math.min(100, confidence + 10);
+            }
+
+            // 8. Return standardized format
+            return {
+                value,
+                confidence: Math.min(100, Math.round(confidence)),
+                bbox: [region.x, region.y, region.w, region.h],
+                source: 'ocr'
+            };
+
+        } catch (error) {
+            console.error(`[FieldExtractor] Error extracting ${fieldKey}:`, error);
+            return {
+                value: '',
+                confidence: 0,
+                bbox: [0, 0, 0, 0],
+                source: 'ocr'
+            };
+        }
+    }
+
+    /**
+     * Crop a region from canvas
+     * @param {HTMLCanvasElement} canvas - Source canvas
+     * @param {Object} region - {x, y, w, h} in pixels
+     * @returns {HTMLCanvasElement} Cropped canvas
+     */
+    cropRegion(canvas, region) {
+        const temp = document.createElement('canvas');
+        temp.width = region.w;
+        temp.height = region.h;
+        const ctx = temp.getContext('2d');
+        ctx.drawImage(
+            canvas,
+            region.x, region.y, region.w, region.h,  // Source
+            0, 0, region.w, region.h                  // Destination
+        );
+        return temp;
+    }
+
+    /**
+     * Map field key to OCR engine field type (for whitelists)
+     */
+    getFieldType(fieldKey) {
+        const typeMap = {
+            'sexo': 'sexo',
+            'clave_elector': 'clave_elector',
+            'curp': 'curp',
+            'seccion': 'seccion',
+            'anio_registro': 'anio_registro',
+            'vigencia': 'vigencia',
+            'mrz': 'mrz',
+            'ocr_code': 'ocr_code',
+            'nombre': 'general',
+            'domicilio': 'general',
+            'municipio': 'general',
+            'localidad': 'general',
+            'estado': 'general',
+            'fecha_nacimiento': 'general'
+        };
+        return typeMap[fieldKey] || 'general';
+    }
+
+    /**
+     * Validate field value using validators.js
+     */
+    validateFieldValue(fieldKey, value) {
+        if (!value || value.length === 0) {
+            return { valid: false };
+        }
+
+        try {
+            switch (fieldKey) {
+                case 'curp':
+                    return INEValidators.validateCURP(value);
+                case 'clave_elector':
+                    return INEValidators.validateClaveElector(value);
+                case 'seccion':
+                    return INEValidators.validateSeccion(value);
+                case 'vigencia':
+                    return INEValidators.validateVigencia(value);
+                case 'mrz':
+                    return INEValidators.validateMRZ(value);
+                case 'sexo':
+                    return INEValidators.validateSexo(value);
+                case 'fecha_nacimiento':
+                    return INEValidators.validateFecha(value);
+                case 'ocr_code':
+                    const cleaned = value.replace(/\D/g, '');
+                    return { valid: cleaned.length === 13 };
+                default:
+                    return { valid: true };
+            }
+        } catch (error) {
+            console.warn(`[FieldExtractor] Validation error for ${fieldKey}:`, error);
+            return { valid: false };
+        }
+    }
+
+    /**
+     * Extract all front fields from canvas
+     * @param {string} model - INE model
+     * @param {HTMLCanvasElement} canvas - Preprocessed canvas (1012×638)
+     * @param {Object} ocr - OCREngine instance
+     * @param {Object} layout - Layout instance
+     * @returns {Promise<Object>} Map of field names to {value, confidence, bbox, source}
+     */
+    async extractFrontFields(model, canvas, ocr, layout) {
+        console.log('[FieldExtractor] Extracting front fields with bbox...');
+
+        const W = 1012, H = 638;
+        const fields = {};
+
+        // Extract each front field
+        const frontFields = ['nombre', 'sexo', 'domicilio', 'curp', 'fecha_nacimiento'];
+
+        for (const fieldKey of frontFields) {
+            fields[fieldKey] = await this.extractFieldWithBbox(
+                fieldKey, canvas, ocr, layout, model, 'front', W, H
+            );
+        }
+
+        // Additional front fields depending on model
+        if (model === 'INE_2023') {
+            // INE_2023 may have additional fields on front
+        }
+
+        console.log('[FieldExtractor] Front fields extracted:', Object.keys(fields));
+        return fields;
+    }
+
+    /**
+     * Extract all back fields from canvas
+     * @param {string} model - INE model
+     * @param {HTMLCanvasElement} canvas - Preprocessed canvas (1012×638)
+     * @param {Object} ocr - OCREngine instance
+     * @param {Object} layout - Layout instance
+     * @returns {Promise<Object>} Map of field names to {value, confidence, bbox, source}
+     */
+    async extractBackFields(model, canvas, ocr, layout) {
+        console.log('[FieldExtractor] Extracting back fields with bbox...');
+
+        const W = 1012, H = 638;
+        const fields = {};
+
+        // Extract each back field
+        const backFields = [
+            'clave_elector',
+            'ocr_code',
+            'seccion',
+            'anio_registro',
+            'vigencia',
+            'mrz'
+        ];
+
+        for (const fieldKey of backFields) {
+            fields[fieldKey] = await this.extractFieldWithBbox(
+                fieldKey, canvas, ocr, layout, model, 'back', W, H
+            );
+        }
+
+        console.log('[FieldExtractor] Back fields extracted:', Object.keys(fields));
+        return fields;
+    }
+
+    /**
+     * Merge QR data with OCR fields
+     * @param {Object} ocrFields - Fields extracted via OCR
+     * @param {Array} qrPayloads - QR code payloads [{index, text, ok}]
+     * @returns {Object} Merged fields with updated source and confidence
+     */
+    mergeQRWithOCR(ocrFields, qrPayloads) {
+        if (!qrPayloads || qrPayloads.length === 0) {
+            return ocrFields;
+        }
+
+        const merged = { ...ocrFields };
+
+        for (const qr of qrPayloads) {
+            if (!qr.ok) continue;
+
+            try {
+                // Try to parse QR as JSON
+                const qrData = JSON.parse(qr.text);
+
+                for (const [key, value] of Object.entries(qrData)) {
+                    const normalizedKey = key.toLowerCase();
+
+                    if (merged[normalizedKey]) {
+                        // Compare OCR vs QR
+                        const similarity = this.ocrCorrector.levenshteinSimilarity(
+                            merged[normalizedKey].value,
+                            value
+                        );
+
+                        if (similarity >= 0.90) {
+                            // High similarity - boost confidence
+                            merged[normalizedKey].confidence = Math.min(100, merged[normalizedKey].confidence + 15);
+                            merged[normalizedKey].source = 'ocr+qr';
+                            console.log(`[FieldExtractor] QR confirmed OCR for ${normalizedKey} (${similarity.toFixed(2)})`);
+                        } else if (merged[normalizedKey].confidence < 75) {
+                            // Low OCR confidence - prefer QR
+                            merged[normalizedKey].value = value;
+                            merged[normalizedKey].confidence = 95;
+                            merged[normalizedKey].source = 'qr';
+                            console.log(`[FieldExtractor] QR replaced OCR for ${normalizedKey}`);
+                        }
+                    } else {
+                        // Field only in QR
+                        merged[normalizedKey] = {
+                            value: value,
+                            confidence: 95,
+                            bbox: [0, 0, 0, 0],  // No bbox for QR-only fields
+                            source: 'qr'
+                        };
+                    }
+                }
+            } catch (e) {
+                // QR is not JSON - could be raw text
+                console.log('[FieldExtractor] QR not JSON:', qr.text);
+            }
+        }
+
+        return merged;
+    }
+
+    // ========================================================================
+    // END NEW METHODS
+    // ========================================================================
+
     /**
      * Validators
      */
