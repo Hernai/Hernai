@@ -403,9 +403,98 @@ class HernAI {
                 console.log('[HernAI] Card boundaries detected successfully');
             }
 
-            // Process with CLAHE, denoising, white balance
-            const processedCanvas = cardDetection.image; // Already 1012×638px from card-detector
+            // Get the detected card image (1012×638px from card-detector)
+            let processedCanvas = cardDetection.image;
             const W = 1012, H = 638;
+
+            // ============================================================
+            // ENHANCED PREPROCESSING PIPELINE
+            // ============================================================
+
+            // Step 1: Detect and correct orientation
+            // Convert canvas to Mat for OpenCV operations
+            if (this.cardDetector.isOpenCVReady) {
+                let cardMat = cv.imread(processedCanvas);
+
+                console.log('[HernAI] 🔄 Detecting and correcting card orientation...');
+                cardMat = await this.cardDetector.detectAndCorrectOrientation(cardMat, this.ocr);
+
+                // Step 2: Crop white margins left by perspective transform
+                console.log('[HernAI] ✂️ Cropping white margins...');
+                cardMat = this.cardDetector.cropWhiteMargins(cardMat);
+
+                // Step 3: Quick classification to determine model (for accurate header cropping)
+                console.log('[HernAI] 🔍 Quick model detection for optimal masking...');
+
+                // Convert to temp canvas for quick OCR
+                const tempCanvas = document.createElement('canvas');
+                cv.imshow(tempCanvas, cardMat);
+
+                // Get quick OCR text for model detection
+                const quickOCRResult = await this.ocr.recognize(tempCanvas);
+                const quickDetection = await this.detector.detect(tempCanvas, quickOCRResult.text);
+                const detectedModel = quickDetection.model || 'unknown';
+                const detectedSide = quickDetection.side || 'front';
+
+                console.log(`[HernAI] Detected model: ${detectedModel}, side: ${detectedSide}`);
+
+                // Step 4: Create enhanced text mask using model-specific coordinates
+                console.log('[HernAI] 🎭 Creating model-aware text mask...');
+
+                // Get the Y coordinate where "nombre" field starts for this model
+                const layout = new INELayout();
+                let headerEndYRel = 0.20; // Default: 20% (fallback)
+
+                if (detectedSide === 'front' && detectedModel !== 'unknown') {
+                    const nombreRegion = layout.getRegion(detectedModel, 'front', 'nombre', cardMat.cols, cardMat.rows);
+                    if (nombreRegion) {
+                        headerEndYRel = nombreRegion.y / cardMat.rows;
+                        console.log(`[HernAI] Using model-specific header crop at Y=${(headerEndYRel * 100).toFixed(1)}% (nombre field starts here)`);
+                    }
+                } else {
+                    console.log('[HernAI] Using default header crop at Y=20% (model unknown or back side)');
+                }
+
+                // Create comprehensive mask that excludes:
+                // - Header area (where "INSTITUTO NACIONAL ELECTORAL" is, up to nombre field)
+                // - Photo area (left 30%)
+                const mask = cv.Mat.zeros(cardMat.rows, cardMat.cols, cv.CV_8UC1);
+
+                const headerEndY = Math.floor(cardMat.rows * headerEndYRel);
+                const photoWidth = Math.floor(cardMat.cols * 0.30);
+
+                const textRect = new cv.Rect(
+                    photoWidth,                          // Start after photo
+                    headerEndY,                          // Start after header
+                    cardMat.cols - photoWidth,          // Width: remaining right area
+                    cardMat.rows - headerEndY           // Height: from header end to bottom
+                );
+
+                const white = new cv.Scalar(255, 255, 255, 255);
+                cv.rectangle(mask,
+                    new cv.Point(textRect.x, textRect.y),
+                    new cv.Point(textRect.x + textRect.width, textRect.y + textRect.height),
+                    white, -1);
+
+                console.log(`[HernAI] Enhanced mask: excluding header (Y<${headerEndY}px) and photo (X<${photoWidth}px)`);
+
+                // Apply mask to zero out header and photo areas
+                const maskedMat = new cv.Mat();
+                cv.bitwise_and(cardMat, cardMat, maskedMat, mask);
+                mask.delete();
+                cardMat.delete();
+
+                // Convert to canvas
+                const finalCanvas = document.createElement('canvas');
+                cv.imshow(finalCanvas, maskedMat);
+                maskedMat.delete();
+
+                processedCanvas = finalCanvas;
+
+                console.log('[HernAI] ✅ Enhanced preprocessing pipeline complete');
+            } else {
+                console.warn('[HernAI] OpenCV not available, skipping enhanced preprocessing');
+            }
 
             timings.pre = Math.round(performance.now() - t0);
             console.log(`[HernAI] ✓ Preprocessing: ${timings.pre}ms`);
@@ -416,7 +505,8 @@ class HernAI {
             const t1 = performance.now();
             if (onProgress) onProgress({ stage: 'classification', progress: 15 });
 
-            // Get full OCR text for classification (not field-specific yet)
+            // Re-run classification on the masked image for final results
+            // (We already did a quick classification above for masking purposes)
             const fullOCRResult = await this.ocr.recognize(processedCanvas);
 
             // Detect INE and classify side + model (uses INEDetector.detect())
