@@ -37,18 +37,18 @@ class INEDetector {
                     'REGISTRO'
                 ]
             },
-            // Umbrales de confianza
+            // Umbrales de confianza (ajustados para ser más permisivos)
             thresholds: {
-                minimumConfidence: 70,
-                patternMatchWeight: 0.4,
-                keywordMatchWeight: 0.3,
-                visualFeaturesWeight: 0.3
+                minimumConfidence: 45,  // Reducido de 70 a 45 para ser más permisivo
+                patternMatchWeight: 0.35,  // Reducido ligeramente
+                keywordMatchWeight: 0.25,  // Reducido ligeramente
+                visualFeaturesWeight: 0.40  // Aumentado para dar más peso a características visuales
             },
             // Características visuales de INE
             visualFeatures: {
                 expectedColors: ['#8B1538', '#006341', '#FFFFFF'], // Vino, verde, blanco
-                aspectRatio: { min: 1.5, max: 1.7 }, // Aprox 85.6mm x 53.98mm
-                minResolution: { width: 400, height: 250 }
+                aspectRatio: { min: 1.3, max: 2.0 }, // Más permisivo: 1.5-1.7 → 1.3-2.0
+                minResolution: { width: 300, height: 180 }  // Más permisivo: 400x250 → 300x180
             }
         };
         this.detectionCache = new Map();
@@ -134,10 +134,25 @@ class INEDetector {
 
             // Step 4: Calculate final confidence
             const weights = this.config.thresholds;
-            const finalConfidence =
+            let finalConfidence =
                 (patternScore.score * weights.patternMatchWeight) +
                 (keywordScore.score * weights.keywordMatchWeight) +
                 (visualScore.score * weights.visualFeaturesWeight);
+
+            // Bonus: Si no hay texto OCR pero las características visuales son fuertes,
+            // dar más peso a lo visual (probablemente el OCR aún no ha corrido)
+            if (!ocrText || ocrText.trim().length < 50) {
+                if (visualScore.score >= 70) {
+                    // Si las características visuales son muy buenas, aumentar confianza
+                    finalConfidence = Math.max(finalConfidence, visualScore.score * 0.75);
+                    result.reasons.push('⚠️ OCR pendiente, evaluación basada en características visuales');
+                }
+            }
+
+            // Bonus: Si detectamos patrones clave (CURP o Clave Elector), alta confianza
+            if (patternScore.matches.CURP || patternScore.matches.CLAVE_ELECTOR) {
+                finalConfidence = Math.max(finalConfidence, 80);
+            }
 
             result.confidence = Math.round(finalConfidence);
             result.isINE = finalConfidence >= weights.minimumConfidence;
@@ -191,17 +206,23 @@ class INEDetector {
 
             let score = 0;
 
-            // Check resolution
+            // Check resolution (más permisivo)
             if (image.width >= this.config.visualFeatures.minResolution.width &&
                 image.height >= this.config.visualFeatures.minResolution.height) {
-                score += 30;
+                score += 35;  // Aumentado de 30 a 35
+            } else if (image.width >= 200 && image.height >= 120) {
+                // Aún dar puntos parciales para resoluciones menores pero aceptables
+                score += 20;
             }
 
-            // Check aspect ratio
+            // Check aspect ratio (más permisivo)
             const ar = features.aspectRatio;
             if (ar >= this.config.visualFeatures.aspectRatio.min &&
                 ar <= this.config.visualFeatures.aspectRatio.max) {
                 score += 40;
+            } else if (ar >= 1.0 && ar <= 2.5) {
+                // Dar puntos parciales para aspect ratios cercanos
+                score += 25;
             }
 
             // Analyze dominant colors (simplified)
@@ -209,9 +230,9 @@ class INEDetector {
             const colorAnalysis = this.analyzeDominantColors(imageData_pixels);
             features.dominantColors = colorAnalysis.colors;
 
-            // Check if INE colors are present
+            // Check if INE colors are present (peso aumentado)
             if (this.hasINEColors(colorAnalysis.colors)) {
-                score += 30;
+                score += 35;  // Aumentado de 30 a 35
             }
 
             features.score = score;
@@ -455,22 +476,34 @@ class INEDetector {
     }
 
     /**
-     * Helper: Check if INE colors are present
+     * Helper: Check if INE colors are present (más permisivo)
      */
     hasINEColors(dominantColors) {
-        // Simplificado: buscar tonos rojos/vino y verdes
+        // Buscar tonos característicos de INE con rangos más amplios
+        let hasWineRed = false;
+        let hasGreenOrGold = false;
+        let hasDarkColors = false;
+
         for (const { color } of dominantColors) {
             const rgb = this.hexToRgb(color);
-            // Check for maroon/wine color (high R, low G, low B)
-            if (rgb.r > 100 && rgb.g < 80 && rgb.b < 80) {
-                return true;
+            if (!rgb) continue;
+
+            // Check for maroon/wine color (más permisivo)
+            if (rgb.r > 80 && rgb.g < 100 && rgb.b < 100) {
+                hasWineRed = true;
             }
-            // Check for green (low R, high G, low B)
-            if (rgb.r < 80 && rgb.g > 80 && rgb.b < 80) {
-                return true;
+            // Check for green or gold tones
+            if ((rgb.r < 100 && rgb.g > 60) || (rgb.r > 150 && rgb.g > 120)) {
+                hasGreenOrGold = true;
+            }
+            // Check for any dark colors (texto, fotos)
+            if (rgb.r < 60 && rgb.g < 60 && rgb.b < 60) {
+                hasDarkColors = true;
             }
         }
-        return false;
+
+        // Si tiene al menos un color característico Y colores oscuros, probablemente es INE
+        return (hasWineRed || hasGreenOrGold) && hasDarkColors;
     }
 
     /**
