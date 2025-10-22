@@ -118,7 +118,7 @@ class INEDetector {
             result.details.visualFeatures = visualScore;
 
             // Step 2: Pattern matching (if OCR text available)
-            let patternScore = 0;
+            let patternScore = { score: 0, matches: {}, confidence: 0 };
             if (ocrText) {
                 patternScore = this.analyzePatterns(ocrText);
                 result.details.patternMatches = patternScore.matches;
@@ -126,7 +126,7 @@ class INEDetector {
             }
 
             // Step 3: Keyword matching (if OCR text available)
-            let keywordScore = 0;
+            let keywordScore = { score: 0, matches: [] };
             if (ocrText) {
                 keywordScore = this.analyzeKeywords(ocrText);
                 result.details.keywordMatches = keywordScore.matches;
