@@ -6,6 +6,7 @@
 class HernAI {
     constructor() {
         this.ocr = new OCREngine();
+        this.cardDetector = new CardDetector();
         this.detector = new INEDetector();
         this.processor = new ImageProcessor();
         this.extractor = new FieldExtractor();
@@ -53,6 +54,11 @@ class HernAI {
             this.initializationProgress = 10;
             await this.processor.initialize();
             console.log('[HernAI] Image processor initialized');
+
+            // Step 1.5: Initialize CardDetector (fast)
+            if (onProgress) onProgress({ component: 'card-detector', progress: 0 });
+            await this.cardDetector.initialize();
+            console.log('[HernAI] Card detector initialized');
 
             // Step 2: Initialize INE Detector (fast)
             if (onProgress) onProgress({ component: 'ine-detector', progress: 0 });
@@ -364,7 +370,7 @@ class HernAI {
             const imageElement = await this.loadImageElement(imageFile);
 
             // Detect and rectify card
-            const cardDetection = await this.detector.detectCard(imageElement);
+            const cardDetection = await this.cardDetector.detectCard(imageElement);
             if (!cardDetection.success) {
                 throw new Error('Could not detect card boundaries');
             }
