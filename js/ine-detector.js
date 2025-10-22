@@ -52,7 +52,9 @@ class INEDetector {
                 expectedColors: ['#8B1538', '#006341', '#FFFFFF'], // Vino, verde, blanco
                 aspectRatio: { min: 1.3, max: 2.0 }, // Más permisivo: 1.5-1.7 → 1.3-2.0
                 minResolution: { width: 300, height: 180 }  // Más permisivo: 400x250 → 300x180
-            }
+            },
+            // Template matching
+            enableTemplates: false  // Set to false to skip loading template images (they don't exist yet)
         };
         this.detectionCache = new Map();
     }
@@ -553,6 +555,11 @@ class INEDetector {
      * @returns {Promise<{model: string, confidence: number}>}
      */
     async templateMatching(imageData) {
+        if (!this.config.enableTemplates) {
+            console.log('[INE-Detector] Template matching disabled, using fallback heuristics');
+            return { model: 'unknown', confidence: 0 };
+        }
+
         console.log('[INE-Detector] Running template matching with anchors...');
 
         if (typeof cv === 'undefined' || !cv.Mat) {
@@ -769,14 +776,26 @@ class INEDetector {
      */
     loadImage(source) {
         return new Promise((resolve, reject) => {
+            if (source instanceof HTMLImageElement) {
+                resolve(source);
+                return;
+            }
+
+            if (source instanceof HTMLCanvasElement) {
+                // Convert canvas to image
+                const img = new Image();
+                img.onload = () => resolve(img);
+                img.onerror = reject;
+                img.src = source.toDataURL();
+                return;
+            }
+
             const img = new Image();
             img.onload = () => resolve(img);
             img.onerror = reject;
 
             if (typeof source === 'string') {
                 img.src = source;
-            } else if (source instanceof HTMLImageElement) {
-                resolve(source);
             } else if (source instanceof Blob) {
                 img.src = URL.createObjectURL(source);
             } else {

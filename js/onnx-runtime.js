@@ -21,7 +21,8 @@ class ONNXRuntime {
             sideModelPath: './assets/onnx/side_cls.onnx',
             modelClassifierPath: './assets/onnx/ine_model_cls.onnx',
             inputSize: 224, // MobileNetV3 típico
-            useFallback: true // Si true, usa heurísticas si falla ONNX
+            useFallback: true, // Si true, usa heurísticas si falla ONNX
+            enableONNXModels: false // Set to false to skip loading ONNX models (they don't exist yet)
         };
 
         // Clases para clasificadores
@@ -87,6 +88,11 @@ class ONNXRuntime {
      * Cargar modelos ONNX
      */
     async loadModels() {
+        if (!this.config.enableONNXModels) {
+            console.log('[ONNX] ONNX models disabled, using heuristic fallbacks only');
+            return;
+        }
+
         console.log('[ONNX] Loading models...');
 
         // Intentar cargar clasificador de lado
