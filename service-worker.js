@@ -3,7 +3,7 @@
  * Provides offline-first caching strategy for browser-only operation
  */
 
-const CACHE_VERSION = 'hernai-v1.0.4';
+const CACHE_VERSION = 'hernai-v1.0.5';
 const CACHE_NAME = `hernai-ine-scanner-${CACHE_VERSION}`;
 
 // Static assets to cache on install
@@ -18,14 +18,14 @@ const STATIC_ASSETS = [
     './js/app.js',
     './js/image-processor.js',
     './js/card-detector.js',
-    './js/side-classifier.js',
-    './js/model-classifier.js',
+    './js/ine-detector.js',
+    './js/onnx-runtime.js',
     './js/ocr-engine.js',
+    './js/ocr-corrector.js',
     './js/field-extractor.js',
-    './js/qr-detector.js',
+    './js/ai-field-extractor.js',
     './js/validators.js',
-    './js/confidence-scorer.js',
-    './js/output-builder.js',
+    './js/layout.js',
 
     // Anti-fraud modules (Fase 2)
     './js/dedupe-hash.js',

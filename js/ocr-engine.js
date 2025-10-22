@@ -81,10 +81,9 @@ class OCREngine {
             console.log('[OCR] Loading Tesseract.js...');
 
             // Create worker with Tesseract.js v5 API
-            // NOTE: logger cannot capture external functions (causes DataCloneError)
-            this.tesseractWorker = await Tesseract.createWorker({
-                logger: (m) => console.log('[OCR]', m)
-            });
+            // NOTE: Even simple logger functions cause DataCloneError in Workers
+            // Skip logger completely - Tesseract v5 handles logging internally
+            this.tesseractWorker = await Tesseract.createWorker();
 
             // Load and initialize language
             await this.tesseractWorker.loadLanguage(this.config.tesseract.lang);
