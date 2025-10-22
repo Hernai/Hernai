@@ -324,6 +324,192 @@ class HernAI {
     }
 
     /**
+     * Run browser-only INE pipeline (new spec-compliant method)
+     * Processes a single INE image (front OR back) and returns structured JSON
+     *
+     * @param {File|Blob|HTMLImageElement} imageFile - Input image
+     * @param {Function} onProgress - Progress callback
+     * @returns {Promise<Object>} Structured result with bbox, confidence, timings
+     */
+    async runINEPipeline(imageFile, onProgress = null) {
+        if (!this.isInitialized) {
+            throw new Error('Application not initialized. Call initialize() first.');
+        }
+
+        console.log('[HernAI] Starting browser-only INE pipeline...');
+
+        const timings = {
+            pre: 0,
+            classify: 0,
+            ocr: 0,
+            qr: 0,
+            post: 0
+        };
+
+        try {
+            // ============================================================
+            // PHASE 1: PREPROCESSING
+            // ============================================================
+            const t0 = performance.now();
+            if (onProgress) onProgress({ stage: 'preprocessing', progress: 5 });
+
+            // Load image
+            const imageElement = await this.loadImageElement(imageFile);
+
+            // Detect and rectify card
+            const cardDetection = await this.detector.detectCard(imageElement);
+            if (!cardDetection.success) {
+                throw new Error('Could not detect card boundaries');
+            }
+
+            // Process with CLAHE, denoising, white balance
+            const processedCanvas = cardDetection.image; // Already 1012×638px from card-detector
+            const W = 1012, H = 638;
+
+            timings.pre = Math.round(performance.now() - t0);
+            console.log(`[HernAI] ✓ Preprocessing: ${timings.pre}ms`);
+
+            // ============================================================
+            // PHASE 2: CLASSIFICATION (Side + Model)
+            // ============================================================
+            const t1 = performance.now();
+            if (onProgress) onProgress({ stage: 'classification', progress: 15 });
+
+            // Get full OCR text for classification (not field-specific yet)
+            const fullOCRResult = await this.ocr.recognize(processedCanvas);
+
+            // Classify side (front/back)
+            const sideResult = await this.detector.classifySide(processedCanvas, fullOCRResult.text);
+            const side = sideResult.side; // 'front' or 'back'
+
+            // Classify model (INE_2019, INE_2023, INE_v3_1, unknown)
+            const modelResult = await this.detector.classifyModel(processedCanvas, fullOCRResult.text);
+            const model = modelResult.model;
+
+            timings.classify = Math.round(performance.now() - t1);
+            console.log(`[HernAI] ✓ Classification: ${timings.classify}ms - Side=${side}, Model=${model}`);
+
+            // ============================================================
+            // PHASE 3: OCR (Field-by-field extraction)
+            // ============================================================
+            const t2 = performance.now();
+            if (onProgress) onProgress({ stage: 'ocr', progress: 35 });
+
+            // Initialize instances if not already in constructor
+            const layout = new Layout();
+            const ocrCorrector = new OCRCorrector();
+            await ocrCorrector.initialize();
+
+            // Extract fields based on side
+            let fields = {};
+            if (side === 'front') {
+                fields = await this.extractor.extractFrontFields(model, processedCanvas, this.ocr, layout);
+            } else if (side === 'back') {
+                fields = await this.extractor.extractBackFields(model, processedCanvas, this.ocr, layout);
+            } else {
+                // Unknown side - try both?
+                console.warn('[HernAI] Unknown side, attempting back extraction');
+                fields = await this.extractor.extractBackFields(model, processedCanvas, this.ocr, layout);
+            }
+
+            timings.ocr = Math.round(performance.now() - t2);
+            console.log(`[HernAI] ✓ OCR: ${timings.ocr}ms - Extracted ${Object.keys(fields).length} fields`);
+
+            // ============================================================
+            // PHASE 4: QR CODE DETECTION
+            // ============================================================
+            const t3 = performance.now();
+            if (onProgress) onProgress({ stage: 'qr', progress: 75 });
+
+            let qrPayloads = [];
+            try {
+                qrPayloads = await this.ocr.detectQRCodes(processedCanvas);
+                console.log(`[HernAI] ✓ Detected ${qrPayloads.length} QR codes`);
+            } catch (err) {
+                console.warn('[HernAI] QR detection failed:', err);
+                qrPayloads = [];
+            }
+
+            timings.qr = Math.round(performance.now() - t3);
+
+            // ============================================================
+            // PHASE 5: POST-PROCESSING (Merge QR + OCR, validate)
+            // ============================================================
+            const t4 = performance.now();
+            if (onProgress) onProgress({ stage: 'postprocessing', progress: 85 });
+
+            // Merge QR data with OCR
+            if (qrPayloads.length > 0) {
+                fields = this.extractor.mergeQRWithOCR(fields, qrPayloads);
+            }
+
+            // Calculate overall confidence
+            const fieldConfidences = Object.values(fields)
+                .filter(f => f && typeof f.confidence === 'number')
+                .map(f => f.confidence);
+
+            const confidence_overall = fieldConfidences.length > 0
+                ? fieldConfidences.reduce((a, b) => a + b, 0) / fieldConfidences.length
+                : 0;
+
+            timings.post = Math.round(performance.now() - t4);
+            console.log(`[HernAI] ✓ Post-processing: ${timings.post}ms`);
+
+            // ============================================================
+            // PHASE 6: BUILD RESULT
+            // ============================================================
+            const result = {
+                side: side,
+                model: model,
+                image_size_px: { w: W, h: H },
+                fields: {
+                    ...fields,
+                    qr_payloads: qrPayloads  // Include QR raw data
+                },
+                confidence_overall: Math.round(confidence_overall * 10) / 10,
+                timings_ms: timings
+            };
+
+            if (onProgress) onProgress({ stage: 'complete', progress: 100 });
+
+            const totalTime = Object.values(timings).reduce((a, b) => a + b, 0);
+            console.log(`[HernAI] ✓ Pipeline complete: ${totalTime}ms`);
+
+            return result;
+
+        } catch (error) {
+            console.error('[HernAI] Pipeline failed:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Load an image file/blob as HTMLImageElement
+     * @param {File|Blob|HTMLImageElement} source - Image source
+     * @returns {Promise<HTMLImageElement>}
+     */
+    async loadImageElement(source) {
+        if (source instanceof HTMLImageElement) {
+            return source;
+        }
+
+        return new Promise((resolve, reject) => {
+            const img = new Image();
+            img.onload = () => resolve(img);
+            img.onerror = () => reject(new Error('Failed to load image'));
+
+            if (source instanceof Blob || source instanceof File) {
+                const url = URL.createObjectURL(source);
+                img.src = url;
+            } else if (typeof source === 'string') {
+                img.src = source;
+            } else {
+                reject(new Error('Invalid image source'));
+            }
+        });
+    }
+
+    /**
      * Export data to JSON
      */
     exportJSON(data = null) {
