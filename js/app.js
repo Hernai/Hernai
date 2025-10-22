@@ -417,7 +417,7 @@ class HernAI {
             if (onProgress) onProgress({ stage: 'ocr', progress: 35 });
 
             // Initialize instances if not already in constructor
-            const layout = new Layout();
+            const layout = new INELayout();
             const ocrCorrector = new OCRCorrector();
             await ocrCorrector.initialize();
 
