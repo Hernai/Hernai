@@ -3,7 +3,7 @@
  * Habilita funcionamiento offline y caché de recursos
  */
 
-const CACHE_NAME = 'ine-scanner-ai-v1.0.0';
+const CACHE_NAME = 'ine-scanner-ai-v1.0.1';  // Incrementado para forzar refresh
 const CACHE_URLS = [
     './',
     './index.html',
@@ -19,11 +19,11 @@ const CACHE_URLS = [
 ];
 
 // CDN resources (cached separately)
-const CDN_CACHE = 'ine-scanner-ai-cdn-v1.0.0';
+const CDN_CACHE = 'ine-scanner-ai-cdn-v1.0.1';  // Incrementado para forzar refresh
 const CDN_URLS = [
     'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.10.0/dist/transformers.min.js',
     'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js',
-    'https://docs.opencv.org/4.5.4/opencv.js'
+    'https://cdn.jsdelivr.net/npm/opencv.js@1.2.1/opencv.js'  // Cambiado a jsdelivr para CORS
 ];
 
 // Install event - cache resources
