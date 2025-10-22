@@ -48,12 +48,17 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Initialize HernAI app
     try {
+        console.log('[Main] Creating HernAI instance...');
         app = new HernAI();
+        console.log('[Main] HernAI instance created successfully');
+
         updateStatus('Inicializando motores de IA...', 0);
+        console.log('[Main] Starting app.initialize()...');
 
         await app.initialize((progress) => {
             const messages = {
                 'image-processor': 'Cargando procesador de imágenes...',
+                'card-detector': 'Cargando detector de tarjetas...',
                 'ine-detector': 'Cargando detector de INE...',
                 'ocr-engine': `Cargando OCR (${progress.stage || 'preparando'})...`,
                 'ai-extractor': 'Cargando extractor de campos...',
@@ -65,7 +70,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
 
         updateStatus('✅ Sistema listo para escanear INE', 100);
-        console.log('[Main] App initialized successfully');
+        console.log('[Main] ✅ App initialized successfully. isInitialized:', app.isInitialized);
 
     } catch (error) {
         console.error('[Main] Initialization error:', error);

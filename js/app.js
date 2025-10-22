@@ -52,23 +52,27 @@ class HernAI {
             // Step 1: Initialize ImageProcessor (fast)
             if (onProgress) onProgress({ component: 'image-processor', progress: 0 });
             this.initializationProgress = 10;
+            console.log('[HernAI] Initializing ImageProcessor...');
             await this.processor.initialize();
-            console.log('[HernAI] Image processor initialized');
+            console.log('[HernAI] ✓ Image processor initialized');
 
             // Step 1.5: Initialize CardDetector (fast)
             if (onProgress) onProgress({ component: 'card-detector', progress: 0 });
+            console.log('[HernAI] Initializing CardDetector...');
             await this.cardDetector.initialize();
-            console.log('[HernAI] Card detector initialized');
+            console.log('[HernAI] ✓ Card detector initialized');
 
             // Step 2: Initialize INE Detector (fast)
             if (onProgress) onProgress({ component: 'ine-detector', progress: 0 });
             this.initializationProgress = 20;
+            console.log('[HernAI] Initializing INE Detector...');
             await this.detector.initialize();
-            console.log('[HernAI] INE detector initialized');
+            console.log('[HernAI] ✓ INE detector initialized');
 
             // Step 3: Initialize OCR engines (slow - Tesseract + Transformers)
             if (onProgress) onProgress({ component: 'ocr-engine', progress: 0 });
             this.initializationProgress = 30;
+            console.log('[HernAI] Initializing OCR Engine...');
 
             await this.ocr.initialize((progress) => {
                 if (onProgress) {
@@ -79,24 +83,27 @@ class HernAI {
                     });
                 }
             });
-            console.log('[HernAI] OCR engine initialized');
+            console.log('[HernAI] ✓ OCR engine initialized');
 
             // Step 4: Initialize AI Field Extractor
             if (onProgress) onProgress({ component: 'ai-extractor', progress: 0 });
             this.initializationProgress = 80;
+            console.log('[HernAI] Initializing AI Field Extractor...');
             await this.aiExtractor.initialize();
-            console.log('[HernAI] AI field extractor initialized');
+            console.log('[HernAI] ✓ AI field extractor initialized');
 
             this.initializationProgress = 100;
             this.isInitialized = true;
 
             const initTime = performance.now() - startTime;
-            console.log(`[HernAI] Application initialized in ${initTime.toFixed(2)}ms`);
+            console.log(`[HernAI] ✅ Application initialized in ${initTime.toFixed(2)}ms`);
 
             if (onProgress) onProgress({ component: 'complete', progress: 100 });
 
         } catch (error) {
-            console.error('[HernAI] Initialization failed:', error);
+            console.error('[HernAI] ❌ Initialization failed:', error);
+            console.error('[HernAI] Error stack:', error.stack);
+            this.isInitialized = false;
             throw new Error('Error al inicializar la aplicación: ' + error.message);
         }
     }
