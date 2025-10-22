@@ -402,16 +402,13 @@ class HernAI {
             // Get full OCR text for classification (not field-specific yet)
             const fullOCRResult = await this.ocr.recognize(processedCanvas);
 
-            // Classify side (front/back)
-            const sideResult = await this.detector.classifySide(processedCanvas, fullOCRResult.text);
-            const side = sideResult.side; // 'front' or 'back'
-
-            // Classify model (INE_2019, INE_2023, INE_v3_1, unknown)
-            const modelResult = await this.detector.classifyModel(processedCanvas, fullOCRResult.text);
-            const model = modelResult.model;
+            // Detect INE and classify side + model (uses INEDetector.detect())
+            const detectionResult = await this.detector.detect(processedCanvas, fullOCRResult.text);
+            const side = detectionResult.side; // 'front', 'back', or 'unknown'
+            const model = detectionResult.model; // 'INE_2019', 'INE_2023', etc.
 
             timings.classify = Math.round(performance.now() - t1);
-            console.log(`[HernAI] ✓ Classification: ${timings.classify}ms - Side=${side}, Model=${model}`);
+            console.log(`[HernAI] ✓ Classification: ${timings.classify}ms - Side=${side}, Model=${model}, Confidence=${detectionResult.confidence}%`);
 
             // ============================================================
             // PHASE 3: OCR (Field-by-field extraction)
