@@ -3,7 +3,7 @@
  * Provides offline-first caching strategy for browser-only operation
  */
 
-const CACHE_VERSION = 'hernai-v1.0.8';
+const CACHE_VERSION = 'hernai-v1.0.9';
 const CACHE_NAME = `hernai-ine-scanner-${CACHE_VERSION}`;
 
 // Static assets to cache on install

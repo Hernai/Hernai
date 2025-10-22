@@ -1,5 +1,5 @@
-35a4611
-2025-10-22T08:15:00Z
+6e8a8f0
+2025-10-22T08:30:00Z
 All fixes applied including:
 - CardDetector fallback normalization
 - detector.detect() method usage
@@ -7,4 +7,7 @@ All fixes applied including:
 - Tesseract.js v5 without logger
 - Layout class name corrected (INELayout)
 - Static method calls for INEValidators
-Build: v1.0.8
+- ONNX models disabled (no 404s)
+- Templates disabled (no 404s)
+- Canvas support in loadImage
+Build: v1.0.9
