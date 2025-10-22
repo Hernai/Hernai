@@ -176,8 +176,16 @@ class HernAI {
             this.state.detectionFront = detectionFront;
             this.state.detectionBack = detectionBack;
 
-            console.log('[HernAI] Initial detection - Image 1:', detectionFront.confidence + '%', detectionFront.side);
-            console.log('[HernAI] Initial detection - Image 2:', detectionBack.confidence + '%', detectionBack.side);
+            // Show detailed confidence including side detection
+            const frontConfidenceStr = detectionFront.sideConfidence
+                ? `${detectionFront.confidence}% (INE) + ${detectionFront.sideConfidence}% (${detectionFront.side})`
+                : `${detectionFront.confidence}% (${detectionFront.side})`;
+            const backConfidenceStr = detectionBack.sideConfidence
+                ? `${detectionBack.confidence}% (INE) + ${detectionBack.sideConfidence}% (${detectionBack.side})`
+                : `${detectionBack.confidence}% (${detectionBack.side})`;
+
+            console.log('[HernAI] 📊 Image 1:', frontConfidenceStr);
+            console.log('[HernAI] 📊 Image 2:', backConfidenceStr);
 
             // AUTO-CORRECT: Intercambiar imágenes si están al revés
             let finalFrontImage = frontImage;

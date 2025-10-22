@@ -159,7 +159,21 @@ class INEDetector {
 
             // Step 5: Determine side (front/back)
             if (ocrText && result.isINE) {
-                result.side = this.determineSide(ocrText, patternScore.matches);
+                const sideResult = this.determineSide(ocrText, patternScore.matches);
+                result.side = sideResult.side;
+                result.sideConfidence = sideResult.sideConfidence;
+                result.frontScore = sideResult.frontScore;
+                result.backScore = sideResult.backScore;
+
+                // IMPORTANT: Adjust overall confidence based on side detection
+                // If we're confident about the side, boost overall confidence
+                if (sideResult.sideConfidence > 0) {
+                    // Blend: 70% original confidence + 30% side confidence
+                    const blendedConfidence = (finalConfidence * 0.7) + (sideResult.sideConfidence * 0.3);
+                    result.confidence = Math.round(blendedConfidence);
+                    console.log(`[INE-Detector] 📊 Confidence adjusted: ${Math.round(finalConfidence)}% → ${result.confidence}% (side: ${sideResult.sideConfidence}%)`);
+                }
+
                 result.model = this.determineModel(ocrText, patternScore.matches);
             }
 
@@ -357,6 +371,7 @@ class INEDetector {
 
     /**
      * Determine which side of the INE (front or back)
+     * Returns object with side and confidence
      */
     determineSide(ocrText, patternMatches) {
         const normalizedText = this.normalizeText(ocrText);
@@ -366,76 +381,116 @@ class INEDetector {
         // CRITICAL: OCR code (13 dígitos) SOLO está en reverso
         if (patternMatches.OCR && patternMatches.OCR.length > 0) {
             backScore += 50;  // Peso MUY alto - es indicador definitivo de reverso
-            console.log('[INE-Detector] OCR code found → REVERSO');
+            console.log('[INE-Detector] 🔴 OCR code found (+50) → REVERSO');
         }
 
         // CRITICAL: Clave Elector está SOLO en reverso
         if (patternMatches.CLAVE_ELECTOR) {
             backScore += 40;
-            console.log('[INE-Detector] Clave Elector found → REVERSO');
+            console.log('[INE-Detector] 🔴 Clave Elector found (+40) → REVERSO');
         }
 
         // Reverso: Keywords
         if (normalizedText.includes('VIGENCIA')) {
             backScore += 15;
+            console.log('[INE-Detector] 🔴 VIGENCIA found (+15)');
         }
         if (normalizedText.includes('EMISION')) {
             backScore += 15;
+            console.log('[INE-Detector] 🔴 EMISION found (+15)');
         }
         if (normalizedText.includes('REGISTRO')) {
             backScore += 10;
+            console.log('[INE-Detector] 🔴 REGISTRO found (+10)');
         }
 
         // CRITICAL: CURP puede estar en anverso o reverso dependiendo del modelo
         // Pero DOMICILIO solo está en anverso
         if (normalizedText.includes('DOMICILIO') || normalizedText.includes('DIRECCION')) {
             frontScore += 40;
-            console.log('[INE-Detector] DOMICILIO found → ANVERSO');
+            console.log('[INE-Detector] 🟢 DOMICILIO found (+40) → ANVERSO');
         }
 
         // Anverso: Keywords
         if (normalizedText.includes('NOMBRE')) {
             frontScore += 20;
+            console.log('[INE-Detector] 🟢 NOMBRE found (+20)');
         }
         if (normalizedText.includes('APELLIDO')) {
             frontScore += 20;
+            console.log('[INE-Detector] 🟢 APELLIDO found (+20)');
         }
         if (normalizedText.includes('SEXO')) {
             frontScore += 15;
+            console.log('[INE-Detector] 🟢 SEXO found (+15)');
         }
         if (normalizedText.includes('EDAD')) {
             frontScore += 15;
+            console.log('[INE-Detector] 🟢 EDAD found (+15)');
+        }
+        if (normalizedText.includes('LOCALIDAD')) {
+            frontScore += 10;
+            console.log('[INE-Detector] 🟢 LOCALIDAD found (+10)');
+        }
+        if (normalizedText.includes('MUNICIPIO')) {
+            frontScore += 10;
+            console.log('[INE-Detector] 🟢 MUNICIPIO found (+10)');
+        }
+        if (normalizedText.includes('SECCION')) {
+            frontScore += 10;
+            console.log('[INE-Detector] 🟢 SECCION found (+10)');
         }
 
         // Si tiene CURP pero no tiene OCR ni Clave Elector, probablemente es anverso
         if (patternMatches.CURP && !patternMatches.OCR && !patternMatches.CLAVE_ELECTOR) {
             frontScore += 20;
+            console.log('[INE-Detector] 🟢 CURP solo (sin OCR/Clave) (+20) → likely ANVERSO');
         }
 
-        console.log(`[INE-Detector] Side scores - Front: ${frontScore}, Back: ${backScore}`);
+        console.log(`[INE-Detector] ⚖️ Side scores - ANVERSO: ${frontScore}, REVERSO: ${backScore}`);
 
-        // Decidir con umbral mínimo
+        // Calcular confianza basada en la diferencia de scores
+        let side = 'unknown';
+        let sideConfidence = 0;
+        const totalScore = frontScore + backScore;
+        const maxScore = Math.max(frontScore, backScore);
+
+        // Decidir lado con umbral mínimo
         if (frontScore > backScore && frontScore >= 20) {
-            return 'front';
+            side = 'front';
+            sideConfidence = Math.min(100, (frontScore / Math.max(totalScore, 100)) * 150);
         } else if (backScore > frontScore && backScore >= 20) {
-            return 'back';
+            side = 'back';
+            sideConfidence = Math.min(100, (backScore / Math.max(totalScore, 100)) * 150);
+        } else {
+            // Si no podemos decidir, verificar indicadores definitivos
+            if (patternMatches.OCR) {
+                side = 'back';
+                sideConfidence = 95;  // Muy alta confianza
+                console.log('[INE-Detector] ✅ OCR code = DEFINITIVO REVERSO (95%)');
+            } else if (normalizedText.includes('DOMICILIO')) {
+                side = 'front';
+                sideConfidence = 90;  // Alta confianza
+                console.log('[INE-Detector] ✅ DOMICILIO = DEFINITIVO ANVERSO (90%)');
+            } else {
+                console.warn('[INE-Detector] ⚠️ Cannot determine side confidently', {
+                    frontScore,
+                    backScore,
+                    hasOCR: !!patternMatches.OCR,
+                    hasClave: !!patternMatches.CLAVE_ELECTOR,
+                    hasCURP: !!patternMatches.CURP
+                });
+            }
         }
 
-        // Si no podemos decidir, retornar 'unknown' pero con más info
-        console.warn('[INE-Detector] Cannot determine side confidently', {
+        console.log(`[INE-Detector] ✅ DECISION: ${side.toUpperCase()} (confianza: ${sideConfidence.toFixed(1)}%)`);
+
+        return {
+            side,
+            sideConfidence: Math.round(sideConfidence),
             frontScore,
-            backScore,
-            hasOCR: !!patternMatches.OCR,
-            hasClave: !!patternMatches.CLAVE_ELECTOR,
-            hasCURP: !!patternMatches.CURP
-        });
-
-        // Si tiene OCR, es definitivamente reverso
-        if (patternMatches.OCR) return 'back';
-        // Si tiene DOMICILIO, es definitivamente anverso
-        if (normalizedText.includes('DOMICILIO')) return 'front';
-
-        return 'unknown';
+            backScore
+        };
     }
 
     /**
