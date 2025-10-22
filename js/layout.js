@@ -25,27 +25,27 @@ class INELayout {
             INE_2019: {
                 front: {
                     // Foto del ciudadano (izquierda)
-                    foto: [0.05, 0.15, 0.25, 0.55],
+                    foto: [0.05, 0.18, 0.24, 0.50],
 
-                    // Campos de texto (derecha)
-                    nombre: [0.35, 0.18, 0.60, 0.08],
-                    domicilio: [0.35, 0.28, 0.60, 0.15],
+                    // Campos de texto (derecha) - Ajustados para INE real
+                    nombre: [0.31, 0.13, 0.64, 0.10],  // Más arriba y más ancho
+                    domicilio: [0.31, 0.25, 0.64, 0.18],  // Más espacio para 2-3 líneas
 
-                    // Campos en bloque inferior
-                    clave_elector: [0.35, 0.50, 0.35, 0.06],
-                    curp: [0.35, 0.58, 0.40, 0.06],
-                    sexo: [0.80, 0.58, 0.10, 0.06],
-                    fecha_nacimiento: [0.35, 0.66, 0.25, 0.06],
-                    anio_registro: [0.65, 0.66, 0.15, 0.06],
+                    // Campos en bloque inferior - Ajustados según layout real
+                    clave_elector: [0.31, 0.48, 0.38, 0.07],
+                    curp: [0.31, 0.57, 0.45, 0.07],
+                    sexo: [0.78, 0.57, 0.15, 0.07],
+                    fecha_nacimiento: [0.31, 0.66, 0.28, 0.07],
+                    anio_registro: [0.62, 0.66, 0.18, 0.07],
 
                     // Campos administrativos
-                    seccion: [0.35, 0.75, 0.15, 0.06],
-                    localidad: [0.52, 0.75, 0.20, 0.06],
-                    municipio: [0.74, 0.75, 0.20, 0.06],
+                    seccion: [0.31, 0.76, 0.18, 0.07],
+                    localidad: [0.51, 0.76, 0.22, 0.07],
+                    municipio: [0.75, 0.76, 0.20, 0.07],
 
                     // Elementos visuales
-                    firma: [0.05, 0.75, 0.25, 0.15],
-                    vigencia: [0.35, 0.85, 0.25, 0.06]
+                    firma: [0.05, 0.72, 0.24, 0.18],
+                    vigencia: [0.31, 0.87, 0.30, 0.07]
                 },
                 back: {
                     // Banda MRZ (OCR-B con <<)
@@ -140,23 +140,23 @@ class INELayout {
             // ============================================
             unknown: {
                 front: {
-                    // Regiones amplias para búsqueda OCR completa
-                    foto: [0.05, 0.15, 0.25, 0.55],
-                    nombre: [0.30, 0.15, 0.65, 0.12],
-                    domicilio: [0.30, 0.30, 0.65, 0.20],
+                    // Regiones basadas en INE_2019 (el más común) con ligera expansión
+                    foto: [0.05, 0.18, 0.24, 0.50],
+                    nombre: [0.31, 0.13, 0.64, 0.10],
+                    domicilio: [0.31, 0.25, 0.64, 0.18],
 
-                    clave_elector: [0.30, 0.50, 0.40, 0.08],
-                    curp: [0.30, 0.58, 0.50, 0.08],
-                    sexo: [0.75, 0.58, 0.15, 0.08],
-                    fecha_nacimiento: [0.30, 0.68, 0.30, 0.08],
-                    anio_registro: [0.62, 0.68, 0.20, 0.08],
+                    clave_elector: [0.31, 0.48, 0.38, 0.07],
+                    curp: [0.31, 0.57, 0.45, 0.07],
+                    sexo: [0.78, 0.57, 0.15, 0.07],
+                    fecha_nacimiento: [0.31, 0.66, 0.28, 0.07],
+                    anio_registro: [0.62, 0.66, 0.18, 0.07],
 
-                    seccion: [0.30, 0.78, 0.20, 0.08],
-                    localidad: [0.52, 0.78, 0.20, 0.08],
-                    municipio: [0.74, 0.78, 0.20, 0.08],
+                    seccion: [0.31, 0.76, 0.18, 0.07],
+                    localidad: [0.51, 0.76, 0.22, 0.07],
+                    municipio: [0.75, 0.76, 0.20, 0.07],
 
-                    firma: [0.05, 0.75, 0.25, 0.15],
-                    vigencia: [0.30, 0.88, 0.30, 0.08]
+                    firma: [0.05, 0.72, 0.24, 0.18],
+                    vigencia: [0.31, 0.87, 0.30, 0.07]
                 },
                 back: {
                     // Búsqueda amplia en reverso

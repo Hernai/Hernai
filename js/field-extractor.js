@@ -1303,12 +1303,13 @@ class FieldExtractor {
     }
 
     /**
-     * Crop a region from canvas
+     * Crop a region from canvas with OCR-optimized preprocessing
      * @param {HTMLCanvasElement} canvas - Source canvas
      * @param {Object} region - {x, y, w, h} in pixels
-     * @returns {HTMLCanvasElement} Cropped canvas
+     * @returns {HTMLCanvasElement} Cropped and preprocessed canvas
      */
     cropRegion(canvas, region) {
+        // 1. Crop the region
         const temp = document.createElement('canvas');
         temp.width = region.w;
         temp.height = region.h;
@@ -1318,7 +1319,97 @@ class FieldExtractor {
             region.x, region.y, region.w, region.h,  // Source
             0, 0, region.w, region.h                  // Destination
         );
-        return temp;
+
+        // 2. Apply OCR-optimized preprocessing
+        return this.preprocessForOCR(temp);
+    }
+
+    /**
+     * Preprocess canvas for better OCR accuracy
+     * - Increase contrast
+     * - Sharpen edges
+     * - Normalize brightness
+     * @param {HTMLCanvasElement} canvas
+     * @returns {HTMLCanvasElement}
+     */
+    preprocessForOCR(canvas) {
+        const ctx = canvas.getContext('2d');
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const data = imageData.data;
+
+        // Calculate average brightness
+        let totalBrightness = 0;
+        for (let i = 0; i < data.length; i += 4) {
+            const brightness = (data[i] + data[i + 1] + data[i + 2]) / 3;
+            totalBrightness += brightness;
+        }
+        const avgBrightness = totalBrightness / (data.length / 4);
+
+        // Adjust contrast and brightness
+        const contrast = 1.3;  // Increase contrast by 30%
+        const brightnessAdjust = avgBrightness < 128 ? 20 : -10;  // Brighten dark images, darken bright ones
+
+        for (let i = 0; i < data.length; i += 4) {
+            // Apply contrast and brightness
+            data[i] = this.clamp(((data[i] - 128) * contrast + 128) + brightnessAdjust);
+            data[i + 1] = this.clamp(((data[i + 1] - 128) * contrast + 128) + brightnessAdjust);
+            data[i + 2] = this.clamp(((data[i + 2] - 128) * contrast + 128) + brightnessAdjust);
+        }
+
+        // Apply sharpening filter (simple unsharp mask approximation)
+        const sharpened = this.sharpenImage(imageData);
+
+        ctx.putImageData(sharpened, 0, 0);
+        return canvas;
+    }
+
+    /**
+     * Apply sharpening filter to image data
+     */
+    sharpenImage(imageData) {
+        const data = imageData.data;
+        const width = imageData.width;
+        const height = imageData.height;
+        const output = new ImageData(width, height);
+
+        // Sharpening kernel
+        const kernel = [
+            0, -1, 0,
+            -1, 5, -1,
+            0, -1, 0
+        ];
+
+        for (let y = 1; y < height - 1; y++) {
+            for (let x = 1; x < width - 1; x++) {
+                for (let c = 0; c < 3; c++) {  // RGB channels only
+                    let sum = 0;
+
+                    // Apply kernel
+                    sum += data[((y - 1) * width + (x - 1)) * 4 + c] * kernel[0];
+                    sum += data[((y - 1) * width + x) * 4 + c] * kernel[1];
+                    sum += data[((y - 1) * width + (x + 1)) * 4 + c] * kernel[2];
+                    sum += data[(y * width + (x - 1)) * 4 + c] * kernel[3];
+                    sum += data[(y * width + x) * 4 + c] * kernel[4];
+                    sum += data[(y * width + (x + 1)) * 4 + c] * kernel[5];
+                    sum += data[((y + 1) * width + (x - 1)) * 4 + c] * kernel[6];
+                    sum += data[((y + 1) * width + x) * 4 + c] * kernel[7];
+                    sum += data[((y + 1) * width + (x + 1)) * 4 + c] * kernel[8];
+
+                    output.data[(y * width + x) * 4 + c] = this.clamp(sum);
+                }
+                // Copy alpha
+                output.data[(y * width + x) * 4 + 3] = data[(y * width + x) * 4 + 3];
+            }
+        }
+
+        return output;
+    }
+
+    /**
+     * Clamp value between 0-255
+     */
+    clamp(value) {
+        return Math.max(0, Math.min(255, Math.round(value)));
     }
 
     /**

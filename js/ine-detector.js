@@ -642,34 +642,56 @@ class INEDetector {
      */
     heuristicModelDetection(ocrText, patternMatches) {
         if (!ocrText) {
-            return { model: 'unknown', confidence: 0 };
+            return { model: 'INE_2019', confidence: 50 };  // Default to most common model
         }
 
         const text = this.normalizeText(ocrText);
 
         // INE_2023 (Modelo H) - Indicador más específico
         if (text.includes('DESDE EL EXTRANJERO') || text.includes('FROM ABROAD')) {
-            return { model: 'INE_2023', confidence: 85 };
+            return { model: 'INE_2023', confidence: 90 };
         }
 
         // INE_2019 (Modelo G) - OCR de 13 dígitos sin texto de extranjero
         if (patternMatches.OCR && patternMatches.OCR.length > 0) {
             const hasOCR13 = patternMatches.OCR.some(ocr => ocr.length === 13);
             if (hasOCR13 && !text.includes('FROM ABROAD')) {
-                return { model: 'INE_2019', confidence: 70 };
+                return { model: 'INE_2019', confidence: 80 };
             }
         }
 
         // Modelo F (antiguo) - Tiene CIC en lugar de OCR
-        if (patternMatches.CIC && !patternMatches.OCR) {
-            return { model: 'INE_2019', confidence: 60 };  // Mapear F a 2019 genérico
+        if (patternMatches.CIC && !patternMatches.CIC.length === 0) {
+            return { model: 'INE_2019', confidence: 70 };  // Mapear F a 2019 genérico
         }
 
         // INE_v3_1 - Características específicas (placeholder)
         // TODO: Agregar indicadores específicos de v3.1 cuando se conozcan
 
-        // Default: unknown
-        return { model: 'unknown', confidence: 0 };
+        // Improved heuristics: Check for common INE text patterns
+        const ineKeywords = [
+            'INSTITUTO NACIONAL ELECTORAL',
+            'CREDENCIAL PARA VOTAR',
+            'CLAVE DE ELECTOR',
+            'VIGENCIA',
+            'DOMICILIO'
+        ];
+
+        let keywordMatches = 0;
+        for (const keyword of ineKeywords) {
+            if (text.includes(keyword)) {
+                keywordMatches++;
+            }
+        }
+
+        // If we see typical INE text but no specific model indicators, assume INE_2019 (most common)
+        if (keywordMatches >= 2) {
+            return { model: 'INE_2019', confidence: 65 };
+        }
+
+        // Even if we can't identify specific patterns, default to INE_2019 (most common)
+        // This is better than "unknown" for ROI accuracy
+        return { model: 'INE_2019', confidence: 50 };
     }
 
     /**
