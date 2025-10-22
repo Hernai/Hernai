@@ -5,20 +5,26 @@
 
 class FieldExtractor {
     constructor() {
-        // Patrones regex para cada campo
+        // Patrones regex para cada campo (más tolerantes)
         this.patterns = {
             CURP: {
-                regex: /[A-Z]{4}\d{6}[HM][A-Z]{5}[A-Z0-9]\d/g,
+                // Permite espacios opcionales: AAAA 123456 H XXXXX X 1
+                regex: /[A-Z]{4}\s?\d{6}\s?[HM]\s?[A-Z]{5}\s?[A-Z0-9]\s?\d/g,
+                cleanRegex: /[A-Z]{4}\d{6}[HM][A-Z]{5}[A-Z0-9]\d/g,
                 validator: this.validateCURP,
                 priority: 10
             },
             CLAVE_ELECTOR: {
-                regex: /[A-Z]{6}\d{8}[HM]\d{3}/g,
+                // Permite espacios opcionales: AAAAAA 12345678 H 123
+                regex: /[A-Z]{6}\s?\d{8}\s?[HM]\s?\d{3}/g,
+                cleanRegex: /[A-Z]{6}\d{8}[HM]\d{3}/g,
                 validator: this.validateClaveElector,
                 priority: 10
             },
             OCR: {
-                regex: /\b\d{13}\b/g,
+                // Permite espacios/guiones entre números
+                regex: /\d[\d\s\-]{11,15}\d/g,
+                cleanRegex: /\d{13}/g,
                 validator: this.validateOCR,
                 priority: 9
             },
@@ -76,14 +82,70 @@ class FieldExtractor {
     }
 
     /**
+     * Normalize OCR text - fix common OCR errors
+     */
+    normalizeOCRText(text) {
+        if (!text) return '';
+
+        let normalized = text;
+
+        // Fix common OCR mistakes
+        const corrections = {
+            // Numbers that look like letters
+            'O': '0',  // O → 0 in numeric contexts
+            'I': '1',  // I → 1 in numeric contexts
+            'l': '1',  // lowercase L → 1
+            'S': '5',  // S → 5 in some fonts
+            'B': '8',  // B → 8 in some cases
+            // Special characters
+            '|': 'I',  // pipe → I
+            '¡': 'I',
+            '°': '0',
+            'º': '0'
+        };
+
+        // Apply corrections in numeric-heavy regions (CURP, Clave Elector, etc.)
+        normalized = normalized.replace(/[A-Z]{4}[O|Il]{6}[HM][A-Z]{5}[A-Z0-9][O|Il]/g, (match) => {
+            return match.replace(/O/g, '0').replace(/I/g, '1').replace(/l/g, '1');
+        });
+
+        // Fix common mistakes in Clave de Elector
+        normalized = normalized.replace(/[A-Z]{6}[O|Il]{8}[HM][O|Il]{3}/g, (match) => {
+            return match.replace(/O/g, '0').replace(/I/g, '1').replace(/l/g, '1');
+        });
+
+        // Remove extra spaces
+        normalized = normalized.replace(/\s+/g, ' ');
+
+        // Fix common word breaks
+        normalized = normalized.replace(/C\s*L\s*A\s*V\s*E/gi, 'CLAVE');
+        normalized = normalized.replace(/C\s*U\s*R\s*P/gi, 'CURP');
+        normalized = normalized.replace(/E\s*L\s*E\s*C\s*T\s*O\s*R/gi, 'ELECTOR');
+        normalized = normalized.replace(/V\s*I\s*G\s*E\s*N\s*C\s*I\s*A/gi, 'VIGENCIA');
+        normalized = normalized.replace(/E\s*M\s*I\s*S\s*I\s*O\s*N/gi, 'EMISION');
+        normalized = normalized.replace(/S\s*E\s*C\s*C\s*I\s*O\s*N/gi, 'SECCION');
+
+        // Normalize whitespace
+        normalized = normalized.trim();
+
+        console.log('[FieldExtractor] Text normalized');
+        return normalized;
+    }
+
+    /**
      * Extract all fields from OCR text
      */
     extract(ocrDataFront, ocrDataBack) {
         console.log('[FieldExtractor] Extracting fields from INE...');
 
-        const textFront = ocrDataFront.text;
-        const textBack = ocrDataBack.text;
+        // Normalize and clean OCR text
+        const textFront = this.normalizeOCRText(ocrDataFront.text);
+        const textBack = this.normalizeOCRText(ocrDataBack.text);
         const combinedText = textFront + '\n' + textBack;
+
+        // Detect model first
+        const model = this.detectModel(combinedText);
+        const fieldLocations = this.getModelFieldLocations(model);
 
         const extractedData = {
             metadata: {
@@ -91,11 +153,12 @@ class FieldExtractor {
                 ocr_confidence_front: ocrDataFront.confidence || 0,
                 ocr_confidence_back: ocrDataBack.confidence || 0,
                 ocr_confidence_avg: ((ocrDataFront.confidence || 0) + (ocrDataBack.confidence || 0)) / 2,
-                model: this.detectModel(combinedText),
-                version: '1.0.0'
+                model: model,
+                model_details: fieldLocations,
+                version: '1.0.1'
             },
-            personal_data: this.extractPersonalData(textFront, ocrDataFront),
-            electoral_data: this.extractElectoralData(combinedText, ocrDataFront, ocrDataBack),
+            personal_data: this.extractPersonalData(textFront, textBack, ocrDataFront, fieldLocations),
+            electoral_data: this.extractElectoralData(textFront, textBack, ocrDataFront, ocrDataBack, fieldLocations),
             address: this.extractAddress(textFront, ocrDataFront),
             raw_text: {
                 front: textFront,
@@ -113,14 +176,15 @@ class FieldExtractor {
     /**
      * Extract personal data
      */
-    extractPersonalData(text, ocrData) {
-        const lines = text.split('\n').map(l => l.trim()).filter(l => l);
-
-        // Extract CURP
-        const curpMatch = this.extractField('CURP', text);
+    extractPersonalData(textFront, textBack, ocrData, fieldLocations) {
+        // Search for CURP in correct side based on model
+        const curpText = fieldLocations.curp_side === 'front' ? textFront : textBack;
+        const curpMatch = this.extractField('CURP', curpText);
         const curp = curpMatch ? curpMatch.value : '';
 
-        // Extract name (usually first lines)
+        // Extract name (usually on front)
+        const nombreText = fieldLocations.nombre_side === 'front' ? textFront : textBack;
+        const lines = nombreText.split('\n').map(l => l.trim()).filter(l => l);
         let nombre = this.extractName(lines);
 
         // Extract birth date and sex from CURP
@@ -173,15 +237,21 @@ class FieldExtractor {
     /**
      * Extract electoral data
      */
-    extractElectoralData(text, ocrDataFront, ocrDataBack) {
-        const claveElectorMatch = this.extractField('CLAVE_ELECTOR', text);
-        const ocrMatch = this.extractField('OCR', text);
-        const cicMatch = this.extractField('CIC', text);
+    extractElectoralData(textFront, textBack, ocrDataFront, ocrDataBack, fieldLocations) {
+        // Search in correct side based on model
+        const combinedText = textFront + '\n' + textBack;
+        const claveText = fieldLocations.clave_elector_side === 'back' ? textBack : combinedText;
+        const ocrText = fieldLocations.ocr_side === 'back' ? textBack : combinedText;
 
-        // Extract years (emission and vigencia)
-        const years = text.match(/20\d{2}/g) || [];
-        const vigenciaMatch = text.match(this.patterns.VIGENCIA.regex);
-        const emisionMatch = text.match(this.patterns.EMISION.regex);
+        const claveElectorMatch = this.extractField('CLAVE_ELECTOR', claveText);
+        const ocrMatch = this.extractField('OCR', ocrText);
+        const cicMatch = this.extractField('CIC', combinedText);
+
+        // Extract years (emission and vigencia) - usually on back
+        const vigenciaText = fieldLocations.vigencia_side === 'back' ? textBack : combinedText;
+        const years = vigenciaText.match(/20\d{2}/g) || [];
+        const vigenciaMatch = vigenciaText.match(this.patterns.VIGENCIA.regex);
+        const emisionMatch = vigenciaText.match(this.patterns.EMISION.regex);
 
         let anoEmision = '';
         let vigencia = '';
@@ -198,8 +268,8 @@ class FieldExtractor {
             vigencia = years[1];
         }
 
-        // Extract seccion
-        const seccion = this.extractSeccion(text);
+        // Extract seccion (usually on back)
+        const seccion = this.extractSeccion(combinedText);
 
         return {
             clave_elector: {
@@ -252,9 +322,16 @@ class FieldExtractor {
         const estado = this.extractEstado(text);
         const municipio = this.extractMunicipio(text);
         const localidad = this.extractLocalidad(text);
+        const domicilioCompleto = this.extractDomicilioCompleto(text);
 
         return {
             visible: true,
+            domicilio_completo: {
+                valor: domicilioCompleto,
+                confianza: domicilioCompleto ? 70 : 0,
+                fuente: 'ocr',
+                obligatorio: false
+            },
             codigo_postal: {
                 valor: cpMatch ? cpMatch.value : '',
                 confianza: cpMatch ? cpMatch.confidence : 0,
@@ -284,6 +361,51 @@ class FieldExtractor {
     }
 
     /**
+     * Extract full address text
+     */
+    extractDomicilioCompleto(text) {
+        const lines = text.split('\n').map(l => l.trim());
+        const addressLines = [];
+
+        // Look for lines after DOMICILIO keyword
+        let foundDomicilio = false;
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const upperLine = line.toUpperCase();
+
+            if (upperLine.includes('DOMICILIO') || upperLine.includes('DIRECCION')) {
+                foundDomicilio = true;
+                // Take current line if it has address data
+                const cleaned = line.replace(/DOMICILIO|DIRECCION/gi, '').trim();
+                if (cleaned && cleaned.length > 5) {
+                    addressLines.push(cleaned);
+                }
+                continue;
+            }
+
+            // If we found DOMICILIO, take next 2-3 lines that look like address
+            if (foundDomicilio && addressLines.length < 3) {
+                // Skip lines with common non-address keywords
+                if (/CURP|CLAVE|ELECTOR|VIGENCIA|EMISION|REGISTRO|INE|FEDERAL/i.test(line)) {
+                    break;
+                }
+
+                // Take lines that look like address (letters, numbers, basic punctuation)
+                if (/[A-Z0-9]/i.test(line) && line.length > 3) {
+                    addressLines.push(line);
+                }
+            }
+
+            // Stop after collecting enough or hitting next section
+            if (addressLines.length >= 3 || (foundDomicilio && /CURP|CLAVE|SECCION/.test(upperLine))) {
+                break;
+            }
+        }
+
+        return addressLines.join(', ').trim();
+    }
+
+    /**
      * Extract a specific field using pattern
      */
     extractField(fieldName, text) {
@@ -293,12 +415,15 @@ class FieldExtractor {
         const matches = text.match(pattern.regex);
         if (!matches || matches.length === 0) return null;
 
+        // Clean matches (remove spaces, hyphens)
+        const cleanedMatches = matches.map(m => m.replace(/[\s\-]/g, ''));
+
         // Take the first match (or best match if validator exists)
-        let bestMatch = matches[0];
+        let bestMatch = cleanedMatches[0];
         let bestConfidence = 85;
 
         if (pattern.validator) {
-            for (const match of matches) {
+            for (const match of cleanedMatches) {
                 if (pattern.validator.call(this, match)) {
                     bestMatch = match;
                     bestConfidence = 95;
@@ -310,7 +435,7 @@ class FieldExtractor {
         return {
             value: bestMatch,
             confidence: bestConfidence,
-            matches: matches
+            matches: cleanedMatches
         };
     }
 
@@ -318,20 +443,61 @@ class FieldExtractor {
      * Extract name from lines
      */
     extractName(lines) {
-        // Name is usually in the first few lines, contains only letters and spaces
-        for (let i = 0; i < Math.min(5, lines.length); i++) {
-            const line = lines[i];
-            // Check if line contains mostly letters (nombre)
-            if (/^[A-ZÁÉÍÓÚÑ\s]{5,}$/i.test(line)) {
-                return line.trim();
+        const fullText = lines.join('\n');
+
+        // Strategy 1: Look for keywords + name pattern
+        const namePatterns = [
+            /(?:NOMBRE|NAME)\s*[:.]?\s*([A-ZÁÉÍÓÚÑ\s]+)/i,
+            /(?:APELLIDO\s*PATERNO|PATERNAL)\s*[:.]?\s*([A-ZÁÉÍÓÚÑ]+)/i,
+            /(?:APELLIDO\s*MATERNO|MATERNAL)\s*[:.]?\s*([A-ZÁÉÍÓÚÑ]+)/i
+        ];
+
+        const nameParts = [];
+        for (const pattern of namePatterns) {
+            const match = fullText.match(pattern);
+            if (match && match[1]) {
+                nameParts.push(match[1].trim());
             }
         }
 
-        // Fallback: join first 2-3 lines that look like names
+        if (nameParts.length > 0) {
+            return nameParts.join(' ').trim();
+        }
+
+        // Strategy 2: Look for lines with 3+ uppercase words (likely full name)
+        for (let i = 0; i < Math.min(10, lines.length); i++) {
+            const line = lines[i].trim();
+            const words = line.split(/\s+/).filter(w => /^[A-ZÁÉÍÓÚÑ]{2,}$/.test(w));
+            if (words.length >= 2 && words.length <= 4) {
+                // Likely apellido paterno, materno, nombre(s)
+                return words.join(' ');
+            }
+        }
+
+        // Strategy 3: First lines that are mostly letters
+        for (let i = 0; i < Math.min(5, lines.length); i++) {
+            const line = lines[i].trim();
+            // Remove common labels
+            const cleaned = line
+                .replace(/NOMBRE|APELLIDO|PATERNO|MATERNO/gi, '')
+                .replace(/[:\.,]/g, '')
+                .trim();
+
+            if (/^[A-ZÁÉÍÓÚÑ\s]{5,}$/i.test(cleaned)) {
+                return cleaned;
+            }
+        }
+
+        // Strategy 4: Fallback - join first few name-like lines
         const nameLines = [];
         for (let i = 0; i < Math.min(3, lines.length); i++) {
-            if (/[A-ZÁÉÍÓÚÑ]{3,}/i.test(lines[i])) {
-                nameLines.push(lines[i]);
+            const cleaned = lines[i]
+                .replace(/NOMBRE|APELLIDO|PATERNO|MATERNO|CURP|CLAVE/gi, '')
+                .replace(/[^A-ZÁÉÍÓÚÑ\s]/gi, '')
+                .trim();
+
+            if (cleaned && /[A-ZÁÉÍÓÚÑ]{3,}/i.test(cleaned)) {
+                nameLines.push(cleaned);
             }
         }
 
@@ -432,24 +598,79 @@ class FieldExtractor {
     }
 
     /**
-     * Detect INE model
+     * Detect INE model with detailed analysis
      */
     detectModel(text) {
         const upperText = text.toUpperCase();
+        const hasCURP = /[A-Z]{4}\d{6}[HM][A-Z]{5}[A-Z0-9]\d/.test(text);
+        const hasClaveElector = /[A-Z]{6}\d{8}[HM]\d{3}/.test(text);
+        const hasOCR13 = /\d{13}/.test(text);
+        const hasCIC9 = /\d{9}/.test(text);
 
+        // Model H (2019-present): Latest model
         if (upperText.includes('DESDE EL EXTRANJERO') || upperText.includes('FROM ABROAD')) {
-            return 'H (con foto desde extranjero)';
+            return 'H';
         }
 
-        if (/\d{13}/.test(text)) {
-            return 'G o H (con código OCR)';
+        // Model G/H (2013-present): OCR code 13 digits
+        if (hasOCR13 && hasCURP && hasClaveElector) {
+            // Check for security features that differentiate G vs H
+            if (upperText.includes('IDMEX') || upperText.match(/20(19|2[0-9])/)) {
+                return 'H';
+            }
+            return 'G';
         }
 
-        if (/\d{9}/.test(text)) {
-            return 'F (con CIC)';
+        // Model F (2008-2013): CIC code 9 digits, CURP on back
+        if (hasCIC9 && hasClaveElector) {
+            return 'F';
+        }
+
+        // Model E (1999-2008): Similar to D, no CIC
+        if (hasClaveElector && !hasCIC9 && !hasOCR13) {
+            return 'E';
+        }
+
+        // Older models or unknown
+        if (hasClaveElector) {
+            return 'C/D/E (antiguo)';
         }
 
         return 'Desconocido';
+    }
+
+    /**
+     * Get field locations based on INE model
+     */
+    getModelFieldLocations(model) {
+        const locations = {
+            'H': {
+                curp_side: 'front',
+                nombre_side: 'front',
+                domicilio_side: 'front',
+                clave_elector_side: 'back',
+                ocr_side: 'back',
+                vigencia_side: 'back'
+            },
+            'G': {
+                curp_side: 'front',
+                nombre_side: 'front',
+                domicilio_side: 'front',
+                clave_elector_side: 'back',
+                ocr_side: 'back',
+                vigencia_side: 'back'
+            },
+            'F': {
+                curp_side: 'back',
+                nombre_side: 'front',
+                domicilio_side: 'front',
+                clave_elector_side: 'back',
+                cic_side: 'back',
+                vigencia_side: 'back'
+            }
+        };
+
+        return locations[model] || locations['G']; // Default to G layout
     }
 
     /**
