@@ -376,10 +376,14 @@ class HernAI {
             // Load image
             const imageElement = await this.loadImageElement(imageFile);
 
-            // Detect and rectify card
+            // Detect and rectify card (with automatic fallback to normalization)
             const cardDetection = await this.cardDetector.detectCard(imageElement);
-            if (!cardDetection.success) {
-                throw new Error('Could not detect card boundaries');
+
+            // Log detection method used
+            if (cardDetection.method === 'fallback_normalization') {
+                console.warn('[HernAI] Card boundaries not detected, using normalized image');
+            } else {
+                console.log('[HernAI] Card boundaries detected successfully');
             }
 
             // Process with CLAHE, denoising, white balance

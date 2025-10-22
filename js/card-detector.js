@@ -64,8 +64,8 @@ class CardDetector {
      */
     async detectCard(imageSource) {
         if (!this.isOpenCVReady) {
-            console.warn('[CardDetector] OpenCV not ready, returning original image');
-            return { success: false, image: imageSource };
+            console.warn('[CardDetector] OpenCV not ready, using fallback normalization');
+            return this.normalizeImageFallback(imageSource);
         }
 
         console.log('[CardDetector] Detecting card boundaries...');
@@ -79,9 +79,9 @@ class CardDetector {
             const corners = this.detectCardCorners(src);
 
             if (!corners) {
-                console.warn('[CardDetector] Could not detect card corners, using original image');
+                console.warn('[CardDetector] Could not detect card corners, using fallback normalization');
                 src.delete();
-                return { success: false, image: imageSource, reason: 'no_corners' };
+                return this.normalizeImageFallback(imageSource);
             }
 
             // Apply perspective transform to extract and rectify card
@@ -108,8 +108,57 @@ class CardDetector {
 
         } catch (error) {
             console.error('[CardDetector] Card detection failed:', error);
-            return { success: false, image: imageSource, error: error.message };
+            return this.normalizeImageFallback(imageSource);
         }
+    }
+
+    /**
+     * Fallback: normalize image to standard size without detection
+     * Used when card boundaries cannot be detected
+     */
+    normalizeImageFallback(imageSource) {
+        console.log('[CardDetector] Using fallback: normalizing to standard size');
+
+        const canvas = this.imageToCanvas(imageSource);
+
+        // Resize to standard dimensions maintaining aspect ratio
+        const outputCanvas = document.createElement('canvas');
+        outputCanvas.width = this.outputWidth;
+        outputCanvas.height = this.outputHeight;
+
+        const ctx = outputCanvas.getContext('2d');
+
+        // Calculate scaling to fit image into output dimensions
+        const scale = Math.min(
+            this.outputWidth / canvas.width,
+            this.outputHeight / canvas.height
+        );
+
+        const scaledWidth = canvas.width * scale;
+        const scaledHeight = canvas.height * scale;
+
+        // Center the image
+        const x = (this.outputWidth - scaledWidth) / 2;
+        const y = (this.outputHeight - scaledHeight) / 2;
+
+        // Fill with white background
+        ctx.fillStyle = 'white';
+        ctx.fillRect(0, 0, this.outputWidth, this.outputHeight);
+
+        // Draw scaled image
+        ctx.drawImage(canvas, x, y, scaledWidth, scaledHeight);
+
+        console.log(`[CardDetector] ✅ Image normalized to ${this.outputWidth}×${this.outputHeight}px (fallback)`);
+
+        return {
+            success: true,
+            image: outputCanvas,
+            dataURL: outputCanvas.toDataURL('image/png'),
+            width: this.outputWidth,
+            height: this.outputHeight,
+            corners: null,
+            method: 'fallback_normalization'
+        };
     }
 
     /**
