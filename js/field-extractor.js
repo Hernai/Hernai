@@ -182,10 +182,9 @@ class FieldExtractor {
         const curpMatch = this.extractField('CURP', curpText);
         const curp = curpMatch ? curpMatch.value : '';
 
-        // Extract name (usually on front)
-        const nombreText = fieldLocations.nombre_side === 'front' ? textFront : textBack;
-        const lines = nombreText.split('\n').map(l => l.trim()).filter(l => l);
-        let nombre = this.extractName(lines);
+        // Extract name (try both sides for best result)
+        let nombre = this.extractName(textFront, textBack);
+        const nombreComponentes = this.splitNameComponents(nombre);
 
         // Extract birth date and sex from CURP
         let fechaNacimiento = '';
@@ -204,6 +203,24 @@ class FieldExtractor {
                 valor: nombre,
                 confianza: this.calculateNameConfidence(nombre, ocrData),
                 fuente: 'ocr',
+                obligatorio: true
+            },
+            apellido_paterno: {
+                valor: nombreComponentes.apellido_paterno,
+                confianza: nombreComponentes.apellido_paterno ? 90 : 0,
+                fuente: 'nombre_completo',
+                obligatorio: true
+            },
+            apellido_materno: {
+                valor: nombreComponentes.apellido_materno,
+                confianza: nombreComponentes.apellido_materno ? 90 : 0,
+                fuente: 'nombre_completo',
+                obligatorio: true
+            },
+            nombres: {
+                valor: nombreComponentes.nombres,
+                confianza: nombreComponentes.nombres ? 90 : 0,
+                fuente: 'nombre_completo',
                 obligatorio: true
             },
             curp: {
@@ -238,37 +255,22 @@ class FieldExtractor {
      * Extract electoral data
      */
     extractElectoralData(textFront, textBack, ocrDataFront, ocrDataBack, fieldLocations) {
-        // Search in correct side based on model
+        // Search in BOTH sides (clave can be in front or back depending on model)
         const combinedText = textFront + '\n' + textBack;
-        const claveText = fieldLocations.clave_elector_side === 'back' ? textBack : combinedText;
-        const ocrText = fieldLocations.ocr_side === 'back' ? textBack : combinedText;
 
-        const claveElectorMatch = this.extractField('CLAVE_ELECTOR', claveText);
-        const ocrMatch = this.extractField('OCR', ocrText);
+        // Try both sides for clave elector
+        const claveElectorMatch = this.extractField('CLAVE_ELECTOR', combinedText);
+
+        // OCR code is usually on back
+        const ocrMatch = this.extractField('OCR', textBack) || this.extractField('OCR', textFront);
+
+        // CIC for older models
         const cicMatch = this.extractField('CIC', combinedText);
 
-        // Extract years (emission and vigencia) - usually on back
-        const vigenciaText = fieldLocations.vigencia_side === 'back' ? textBack : combinedText;
-        const years = vigenciaText.match(/20\d{2}/g) || [];
-        const vigenciaMatch = vigenciaText.match(this.patterns.VIGENCIA.regex);
-        const emisionMatch = vigenciaText.match(this.patterns.EMISION.regex);
+        // Extract years - improved detection
+        const { anoRegistro, anoEmision, vigencia } = this.extractYears(combinedText);
 
-        let anoEmision = '';
-        let vigencia = '';
-
-        if (emisionMatch) {
-            anoEmision = emisionMatch[1] || emisionMatch[0].match(/20\d{2}/)[0];
-        } else if (years.length > 0) {
-            anoEmision = years[0];
-        }
-
-        if (vigenciaMatch) {
-            vigencia = vigenciaMatch[1] || vigenciaMatch[0].match(/20\d{2}/)[0];
-        } else if (years.length > 1) {
-            vigencia = years[1];
-        }
-
-        // Extract seccion (usually on back)
+        // Extract seccion - improved
         const seccion = this.extractSeccion(combinedText);
 
         return {
@@ -293,15 +295,21 @@ class FieldExtractor {
                 fuente: 'ocr',
                 obligatorio: false
             },
+            ano_registro: {
+                valor: anoRegistro,
+                confianza: anoRegistro ? 85 : 0,
+                fuente: 'ocr',
+                obligatorio: false
+            },
             ano_emision: {
                 valor: anoEmision,
-                confianza: emisionMatch ? 90 : (anoEmision ? 70 : 0),
+                confianza: anoEmision ? 85 : 0,
                 fuente: 'ocr',
                 obligatorio: true
             },
             vigencia: {
                 valor: vigencia,
-                confianza: vigenciaMatch ? 90 : (vigencia ? 70 : 0),
+                confianza: vigencia ? 85 : 0,
                 fuente: 'ocr',
                 obligatorio: true
             },
@@ -440,16 +448,40 @@ class FieldExtractor {
     }
 
     /**
-     * Extract name from lines
+     * Extract name from lines - improved with barcode parsing
      */
-    extractName(lines) {
-        const fullText = lines.join('\n');
+    extractName(textFront, textBack) {
+        // Strategy 1: Parse from barcode/magnetic strip in back (most reliable)
+        const barcodeNameMatch = textBack.match(/([A-Z]{2,}C[A-Z]{2,}C[A-Z]{2,})/);
+        if (barcodeNameMatch) {
+            const barcodeName = this.parseNameFromBarcode(barcodeNameMatch[1]);
+            if (barcodeName) {
+                console.log('[FieldExtractor] Name extracted from barcode:', barcodeName);
+                return barcodeName;
+            }
+        }
 
-        // Strategy 1: Look for keywords + name pattern
+        const lines = textFront.split('\n').map(l => l.trim()).filter(l => l);
+        const fullText = textFront;
+
+        // Strategy 2: Look after NOMBRE keyword
+        const nombreMatch = fullText.match(/NOMBRE\s+(?:SEXO\s+[HM]\s+)?([A-ZÁÉÍÓÚÑ\s]+?)(?=DOMICILIO|CURP|CLAVE|$)/i);
+        if (nombreMatch && nombreMatch[1]) {
+            const cleaned = nombreMatch[1]
+                .replace(/SEXO|[HM]|ua|-|DOMICILIO/gi, '')
+                .replace(/\s+/g, ' ')
+                .trim();
+            if (cleaned.length > 5 && /[A-Z]{3,}/.test(cleaned)) {
+                console.log('[FieldExtractor] Name extracted after NOMBRE keyword:', cleaned);
+                return cleaned;
+            }
+        }
+
+        // Strategy 3: Look for apellido/nombre structure
         const namePatterns = [
-            /(?:NOMBRE|NAME)\s*[:.]?\s*([A-ZÁÉÍÓÚÑ\s]+)/i,
             /(?:APELLIDO\s*PATERNO|PATERNAL)\s*[:.]?\s*([A-ZÁÉÍÓÚÑ]+)/i,
-            /(?:APELLIDO\s*MATERNO|MATERNAL)\s*[:.]?\s*([A-ZÁÉÍÓÚÑ]+)/i
+            /(?:APELLIDO\s*MATERNO|MATERNAL)\s*[:.]?\s*([A-ZÁÉÍÓÚÑ]+)/i,
+            /(?:NOMBRE|NAME)\s*[:.]?\s*([A-ZÁÉÍÓÚÑ\s]+?)(?=SEXO|DOMICILIO|CURP|$)/i
         ];
 
         const nameParts = [];
@@ -460,48 +492,96 @@ class FieldExtractor {
             }
         }
 
-        if (nameParts.length > 0) {
-            return nameParts.join(' ').trim();
+        if (nameParts.length >= 2) {
+            const fullName = nameParts.join(' ').trim();
+            console.log('[FieldExtractor] Name extracted from structured fields:', fullName);
+            return fullName;
         }
 
-        // Strategy 2: Look for lines with 3+ uppercase words (likely full name)
+        // Strategy 4: Look for lines with 2-4 uppercase words
         for (let i = 0; i < Math.min(10, lines.length); i++) {
             const line = lines[i].trim();
             const words = line.split(/\s+/).filter(w => /^[A-ZÁÉÍÓÚÑ]{2,}$/.test(w));
             if (words.length >= 2 && words.length <= 4) {
-                // Likely apellido paterno, materno, nombre(s)
-                return words.join(' ');
+                const fullName = words.join(' ');
+                console.log('[FieldExtractor] Name extracted from word pattern:', fullName);
+                return fullName;
             }
         }
 
-        // Strategy 3: First lines that are mostly letters
-        for (let i = 0; i < Math.min(5, lines.length); i++) {
-            const line = lines[i].trim();
-            // Remove common labels
-            const cleaned = line
-                .replace(/NOMBRE|APELLIDO|PATERNO|MATERNO/gi, '')
-                .replace(/[:\.,]/g, '')
-                .trim();
-
-            if (/^[A-ZÁÉÍÓÚÑ\s]{5,}$/i.test(cleaned)) {
-                return cleaned;
-            }
-        }
-
-        // Strategy 4: Fallback - join first few name-like lines
+        // Strategy 5: Fallback - first clean alphabetic lines
         const nameLines = [];
-        for (let i = 0; i < Math.min(3, lines.length); i++) {
+        for (let i = 0; i < Math.min(5, lines.length); i++) {
             const cleaned = lines[i]
-                .replace(/NOMBRE|APELLIDO|PATERNO|MATERNO|CURP|CLAVE/gi, '')
+                .replace(/NOMBRE|APELLIDO|PATERNO|MATERNO|SEXO|CURP|CLAVE|DOMICILIO/gi, '')
                 .replace(/[^A-ZÁÉÍÓÚÑ\s]/gi, '')
                 .trim();
 
-            if (cleaned && /[A-ZÁÉÍÓÚÑ]{3,}/i.test(cleaned)) {
+            if (cleaned && /[A-ZÁÉÍÓÚÑ]{3,}/i.test(cleaned) && cleaned.length > 2) {
                 nameLines.push(cleaned);
             }
         }
 
-        return nameLines.join(' ').trim();
+        const fallbackName = nameLines.join(' ').trim();
+        console.log('[FieldExtractor] Name extracted from fallback:', fallbackName);
+        return fallbackName;
+    }
+
+    /**
+     * Parse name from barcode format: APELLIDOCAPELLIDOCNOMBRE
+     */
+    parseNameFromBarcode(barcode) {
+        // Format: GONZALEZCVIDALEIVERCFABIAN
+        // Pattern: APELLIDO1 C APELLIDO2 C NOMBRE
+        const parts = barcode.split('C').filter(p => p && p.length > 1);
+
+        if (parts.length >= 2) {
+            // Take first 2-3 parts as apellidos and nombre
+            const apellidoPaterno = parts[0];
+            const apellidoMaterno = parts.length > 2 ? parts[1] : '';
+            const nombres = parts.length > 2 ? parts.slice(2).join(' ') : parts[1];
+
+            const fullName = [apellidoPaterno, apellidoMaterno, nombres]
+                .filter(p => p)
+                .join(' ');
+
+            return fullName;
+        }
+
+        return '';
+    }
+
+    /**
+     * Split name into components
+     */
+    splitNameComponents(fullName) {
+        const parts = fullName.split(/\s+/).filter(p => p && p.length > 1);
+
+        if (parts.length >= 3) {
+            return {
+                apellido_paterno: parts[0],
+                apellido_materno: parts[1],
+                nombres: parts.slice(2).join(' ')
+            };
+        } else if (parts.length === 2) {
+            return {
+                apellido_paterno: parts[0],
+                apellido_materno: '',
+                nombres: parts[1]
+            };
+        } else if (parts.length === 1) {
+            return {
+                apellido_paterno: parts[0],
+                apellido_materno: '',
+                nombres: ''
+            };
+        }
+
+        return {
+            apellido_paterno: '',
+            apellido_materno: '',
+            nombres: ''
+        };
     }
 
     /**
@@ -542,33 +622,93 @@ class FieldExtractor {
     }
 
     /**
-     * Extract estado
+     * Extract estado - improved
      */
     extractEstado(text) {
         const upperText = text.toUpperCase();
+
+        // First try: exact match or with common abbreviations
         for (const estado of this.estados) {
             if (upperText.includes(estado)) {
                 return estado;
             }
         }
+
+        // Second try: common abbreviations
+        const abreviaturas = {
+            'CHIS': 'CHIAPAS',
+            'CHI': 'CHIAPAS',
+            'CDMX': 'CIUDAD DE MEXICO',
+            'DF': 'DISTRITO FEDERAL',
+            'MEX': 'ESTADO DE MEXICO',
+            'NL': 'NUEVO LEON',
+            'QRO': 'QUERETARO',
+            'QROO': 'QUINTANA ROO',
+            'SLP': 'SAN LUIS POTOSI',
+            'BC': 'BAJA CALIFORNIA',
+            'BCS': 'BAJA CALIFORNIA SUR'
+        };
+
+        for (const [abrev, estado] of Object.entries(abreviaturas)) {
+            // Look for abbreviation as separate word or at end with comma/period
+            if (new RegExp(`\\b${abrev}[\\.\\,\\s]`, 'i').test(upperText)) {
+                console.log('[FieldExtractor] Estado extracted from abbreviation:', estado);
+                return estado;
+            }
+        }
+
+        // Third try: partial matches (e.g., "CHIAPADE" should match "CHIAPAS")
+        for (const estado of this.estados) {
+            const estadoStart = estado.substring(0, 5);
+            if (upperText.includes(estadoStart)) {
+                console.log('[FieldExtractor] Estado extracted from partial match:', estado);
+                return estado;
+            }
+        }
+
         return '';
     }
 
     /**
-     * Extract municipio
+     * Extract municipio - improved
      */
     extractMunicipio(text) {
         const lines = text.split('\n');
+        const upperText = text.toUpperCase();
+
+        // Strategy 1: Look after MUNICIPIO keyword
         for (const line of lines) {
             const upperLine = line.toUpperCase();
             if (this.keywords.municipio.some(kw => upperLine.includes(kw))) {
-                // Extract the line after keyword
                 const parts = line.split(/MUNICIPIO|MPIO|MUN/i);
                 if (parts.length > 1) {
-                    return parts[1].trim().replace(/[^A-ZÁÉÍÓÚÑ\s]/gi, '');
+                    const municipio = parts[1].trim().replace(/[^A-ZÁÉÍÓÚÑ\s]/gi, '');
+                    console.log('[FieldExtractor] Municipio extracted after keyword:', municipio);
+                    return municipio;
                 }
             }
         }
+
+        // Strategy 2: Look for city-like names in address
+        // Pattern: "CITY_NAME, STATE_ABBREV" like "CHIAPADE CORZO, CHI"
+        const cityStateMatch = upperText.match(/([A-ZÁÉÍÓÚÑ\s]{3,}),\s*([A-Z]{2,4})/i);
+        if (cityStateMatch) {
+            const cityName = cityStateMatch[1]
+                .replace(/BARR|COLONIA|COL\.|FRACC/gi, '')
+                .trim();
+
+            if (cityName.length > 3) {
+                // Fix common OCR issues: "CHIAPADE CORZO" → "CHIAPA DE CORZO"
+                const fixed = cityName
+                    .replace(/([A-Z]+)DE([A-Z])/g, '$1 DE $2')  // Fix "XXXDEXXX" → "XXX DE XXX"
+                    .replace(/\s+/g, ' ')
+                    .trim();
+
+                console.log('[FieldExtractor] Municipio extracted from city pattern:', fixed);
+                return fixed;
+            }
+        }
+
         return '';
     }
 
@@ -590,11 +730,77 @@ class FieldExtractor {
     }
 
     /**
-     * Extract seccion
+     * Extract years (registro, emision, vigencia)
+     */
+    extractYears(text) {
+        let anoRegistro = '';
+        let anoEmision = '';
+        let vigencia = '';
+
+        // Look for "AÑO DE REGISTRO" or "REGISTRO" + year
+        const registroMatch = text.match(/(?:AÑO\s*DE\s*REGISTRO|REGISTRO)\s*:?\s*(\d{4,6})/i);
+        if (registroMatch) {
+            const year = registroMatch[1];
+            // Format: 201201 = 2012, or just 2012
+            anoRegistro = year.length === 6 ? year.substring(0, 4) : year;
+        }
+
+        // Look for "EMISION" + year
+        const emisionMatch = text.match(/(?:EMISION|EMIS\.?)\s*:?\s*(\d{4})/i);
+        if (emisionMatch) {
+            anoEmision = emisionMatch[1];
+        }
+
+        // Look for "VIGENCIA" + year or year range like "2029-2023" or "209-203"
+        const vigenciaMatch = text.match(/(?:VIGENCIA|VIG\.?)\s*:?\s*(\d{3,4})[\s\-]*(\d{3})?/i);
+        if (vigenciaMatch) {
+            let year = vigenciaMatch[1];
+            // Handle short format: 209 = 2029, 203 = 2023
+            if (year.length === 3) {
+                year = '20' + year;
+            }
+            vigencia = year;
+        }
+
+        // Fallback: extract all 4-digit years
+        const allYears = text.match(/20\d{2}/g) || [];
+        if (!anoRegistro && allYears.length > 0) {
+            anoRegistro = allYears[0];
+        }
+        if (!anoEmision && allYears.length > 0) {
+            anoEmision = allYears[0];
+        }
+        if (!vigencia && allYears.length > 1) {
+            vigencia = allYears[allYears.length - 1]; // Last year is usually vigencia
+        }
+
+        console.log('[FieldExtractor] Years extracted:', { anoRegistro, anoEmision, vigencia });
+
+        return { anoRegistro, anoEmision, vigencia };
+    }
+
+    /**
+     * Extract seccion - improved
      */
     extractSeccion(text) {
-        const match = text.match(/(?:SECCION|SECC|SEC)\s*:?\s*(\d{3,4})/i);
-        return match ? match[1] : '';
+        // Try multiple patterns
+        const patterns = [
+            /(?:SECCION|SECCIÓN)\s*:?\s*(\d{3,4})/i,
+            /(?:SECC|SEC)\s*:?\s*(\d{3,4})/i,
+            /(?:SECCIÓN|SECCION)\s+(\d{3,4})/i,
+            // Standalone 3-digit number that looks like section
+            /\b(\d{3})\b/g
+        ];
+
+        for (const pattern of patterns) {
+            const match = text.match(pattern);
+            if (match) {
+                console.log('[FieldExtractor] Seccion extracted:', match[1]);
+                return match[1];
+            }
+        }
+
+        return '';
     }
 
     /**
