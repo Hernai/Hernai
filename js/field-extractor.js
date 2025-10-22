@@ -1497,74 +1497,100 @@ class FieldExtractor {
      * @returns {Object} Configuration: {useBinarization, blockSize, C, useMorphology, operation, kernelSize}
      */
     getPreprocessingConfig(fieldKey) {
+        // ⚠️ PREPROCESAMIENTO ADAPTATIVO DESACTIVADO TEMPORALMENTE
+        //
+        // PROBLEMA IDENTIFICADO (resultados del usuario):
+        // - Confianza bajó de 19.4% a 8.2% con preprocesamiento agresivo
+        // - nombre: "NOMBREW S NOMBRECF WSERRER SEXOH" (mezcla de campos)
+        // - Cierre morfológico CONECTA texto horizontal de campos adyacentes
+        // - Binarización adaptativa ELIMINA texto delgado
+        // - Tiempo OCR aumentó de 912ms a 3436ms
+        //
+        // CAUSA RAÍZ:
+        // - CLOSING morfológico conecta caracteres entre campos (horizontalmente)
+        // - OCR lee toda la línea como un solo campo
+        // - Coordenadas están bien, el problema es el preprocesamiento
+        //
+        // SOLUCIÓN:
+        // - Desactivar binarización y morfología
+        // - Usar solo grayscale + upscaling 3x
+        // - Tesseract tiene mejor preprocesamiento interno
+        //
+        // TODO: Re-evaluar preprocesamiento solo para campos que fallen validación
+
         const configs = {
-            // Text blocks: moderate binarization + closing for broken text
+            // TODOS LOS CAMPOS: Solo grayscale (sin binarización ni morfología)
             'nombre': {
-                useBinarization: true,
-                blockSize: 35,
-                C: 2,
-                useMorphology: true,
-                operation: 'closing',
-                kernelSize: 2
+                useBinarization: false,
+                blockSize: 0,
+                C: 0,
+                useMorphology: false,
+                operation: null,
+                kernelSize: 0
             },
             'domicilio': {
-                useBinarization: true,
-                blockSize: 35,
-                C: 2,
-                useMorphology: true,
-                operation: 'closing',
-                kernelSize: 2
+                useBinarization: false,
+                blockSize: 0,
+                C: 0,
+                useMorphology: false,
+                operation: null,
+                kernelSize: 0
             },
 
-            // Alphanumeric IDs: stronger binarization + dilation for thin text
             'curp': {
-                useBinarization: true,
-                blockSize: 31,
-                C: 3,
-                useMorphology: true,
-                operation: 'dilate',
-                kernelSize: 2
+                useBinarization: false,
+                blockSize: 0,
+                C: 0,
+                useMorphology: false,
+                operation: null,
+                kernelSize: 0
             },
             'clave_elector': {
-                useBinarization: true,
-                blockSize: 31,
-                C: 3,
-                useMorphology: true,
-                operation: 'dilate',
-                kernelSize: 2
+                useBinarization: false,
+                blockSize: 0,
+                C: 0,
+                useMorphology: false,
+                operation: null,
+                kernelSize: 0
             },
 
-            // Small fields: aggressive binarization
             'sexo': {
-                useBinarization: true,
-                blockSize: 25,
-                C: 5,
-                useMorphology: true,
-                operation: 'dilate',
-                kernelSize: 3
+                useBinarization: false,
+                blockSize: 0,
+                C: 0,
+                useMorphology: false,
+                operation: null,
+                kernelSize: 0
             },
             'seccion': {
-                useBinarization: true,
-                blockSize: 27,
-                C: 4,
+                useBinarization: false,
+                blockSize: 0,
+                C: 0,
                 useMorphology: false,
                 operation: null,
                 kernelSize: 0
             },
             'anio_registro': {
-                useBinarization: true,
-                blockSize: 27,
-                C: 4,
+                useBinarization: false,
+                blockSize: 0,
+                C: 0,
+                useMorphology: false,
+                operation: null,
+                kernelSize: 0
+            },
+            'fecha_nacimiento': {
+                useBinarization: false,
+                blockSize: 0,
+                C: 0,
                 useMorphology: false,
                 operation: null,
                 kernelSize: 0
             },
 
-            // Numeric codes: moderate binarization
             'ocr_code': {
-                useBinarization: true,
-                blockSize: 29,
-                C: 3,
+                useBinarization: false,
+                blockSize: 0,
+                C: 0,
                 useMorphology: false,
                 operation: null,
                 kernelSize: 0
