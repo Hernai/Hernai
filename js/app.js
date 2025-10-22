@@ -840,6 +840,27 @@ class HernAI {
     }
 
     /**
+     * Convert dataURL to canvas
+     * @param {string} dataURL - Data URL of image
+     * @returns {Promise<HTMLCanvasElement>}
+     */
+    async dataURLToCanvas(dataURL) {
+        return new Promise((resolve, reject) => {
+            const img = new Image();
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                canvas.width = img.width;
+                canvas.height = img.height;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0);
+                resolve(canvas);
+            };
+            img.onerror = reject;
+            img.src = dataURL;
+        });
+    }
+
+    /**
      * Cleanup resources
      */
     async terminate() {
@@ -912,27 +933,6 @@ if (typeof document !== 'undefined') {
                 .catch(error => {
                     console.error('[PWA] Service Worker registration failed:', error);
                 });
-        });
-    }
-
-    /**
-     * Convert dataURL to canvas
-     * @param {string} dataURL - Data URL of image
-     * @returns {Promise<HTMLCanvasElement>}
-     */
-    async dataURLToCanvas(dataURL) {
-        return new Promise((resolve, reject) => {
-            const img = new Image();
-            img.onload = () => {
-                const canvas = document.createElement('canvas');
-                canvas.width = img.width;
-                canvas.height = img.height;
-                const ctx = canvas.getContext('2d');
-                ctx.drawImage(img, 0, 0);
-                resolve(canvas);
-            };
-            img.onerror = reject;
-            img.src = dataURL;
         });
     }
 }
