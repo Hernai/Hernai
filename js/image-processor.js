@@ -6,11 +6,13 @@
 class ImageProcessor {
     constructor() {
         this.isOpenCVReady = false;
+        this.cardDetector = new CardDetector();  // Card detection and extraction
         this.config = {
             autoRotate: true,
             autoContrast: true,
             autoDenoising: true,
             autoPerspective: true,
+            autoCardDetection: true,  // Enable automatic card detection
             targetSize: { width: 1600, height: 1000 }, // Optimal for OCR
         };
     }
@@ -33,6 +35,8 @@ class ImageProcessor {
 
             if (cv.Mat) {
                 this.isOpenCVReady = true;
+                // Initialize card detector
+                this.cardDetector.initialize();
                 console.log('[ImageProcessor] OpenCV.js ready');
                 resolve(true);
                 return;
@@ -43,6 +47,8 @@ class ImageProcessor {
                 if (cv.Mat) {
                     clearInterval(checkInterval);
                     this.isOpenCVReady = true;
+                    // Initialize card detector
+                    this.cardDetector.initialize();
                     console.log('[ImageProcessor] OpenCV.js initialized');
                     resolve(true);
                 }
@@ -585,13 +591,36 @@ class ImageProcessor {
      * Process specifically for INE credentials with all advanced techniques
      */
     async processForINE(imageSource) {
-        console.log('[ImageProcessor] Processing with INE-optimized pipeline...');
+        console.log('[ImageProcessor] Processing with INE-optimized pipeline + card detection...');
         const startTime = performance.now();
 
         try {
             // Load image
             const image = await this.loadImage(imageSource);
             let processedCanvas = this.imageToCanvas(image);
+
+            // STEP 0: CARD DETECTION - Extract card region FIRST (excluding background, hands, etc.)
+            if (this.config.autoCardDetection && this.isOpenCVReady) {
+                console.log('[ImageProcessor] 🎯 Detecting and extracting card boundaries...');
+                const cardResult = await this.cardDetector.detectCard(processedCanvas);
+
+                if (cardResult.success) {
+                    processedCanvas = cardResult.image;
+                    console.log('[ImageProcessor] ✅ Card extracted successfully - now processing only card region');
+                } else {
+                    console.warn('[ImageProcessor] ⚠️ Card detection failed, using full image:', cardResult.reason);
+                }
+            }
+
+            // STEP 0b: SEGMENT TEXT REGIONS - Exclude photo area
+            let textMask = null;
+            if (this.isOpenCVReady) {
+                console.log('[ImageProcessor] 📐 Segmenting text regions (excluding photo)...');
+                textMask = this.cardDetector.segmentTextRegions(processedCanvas);
+                if (textMask) {
+                    console.log('[ImageProcessor] ✅ Text region mask created');
+                }
+            }
 
             // Step 1: Resize to optimal dimensions
             processedCanvas = await this.resize(processedCanvas, { width: 1800, height: 1200 });
@@ -607,33 +636,38 @@ class ImageProcessor {
                 processedCanvas = await this.deskew(processedCanvas);
             }
 
-            // Step 4: Perspective correction
-            if (this.isOpenCVReady) {
-                processedCanvas = await this.correctPerspective(processedCanvas);
-            }
+            // Step 4: Skip perspective correction (already done by card detection)
+            // The card detection already applies perspective transform
 
-            // Step 5: Enhanced contrast with CLAHE
+            // Step 5: Enhanced contrast with CLAHE - ONLY on text regions
             processedCanvas = await this.enhanceContrast(processedCanvas);
 
-            // Step 6: Denoise
+            // Step 6: Denoise - ONLY on text regions
             if (this.isOpenCVReady) {
                 processedCanvas = await this.denoise(processedCanvas);
             }
 
-            // Step 7: Sharpen text
+            // Step 7: Sharpen text - ONLY on text regions
             processedCanvas = await this.sharpen(processedCanvas);
 
-            // Step 8: Advanced binarization with morphology
+            // Step 8: Advanced binarization with morphology - ONLY on text regions
             processedCanvas = await this.binarize(processedCanvas);
 
+            // Step 9: Apply text mask to zero out photo area
+            if (textMask && this.isOpenCVReady) {
+                console.log('[ImageProcessor] 🎭 Applying text mask (zeroing photo area)...');
+                processedCanvas = this.cardDetector.applyTextMask(processedCanvas, textMask);
+                textMask.delete();
+            }
+
             const processingTime = performance.now() - startTime;
-            console.log(`[ImageProcessor] INE processing complete in ${processingTime.toFixed(2)}ms`);
+            console.log(`[ImageProcessor] ✅ INE processing complete in ${processingTime.toFixed(2)}ms`);
 
             return {
                 canvas: processedCanvas,
                 dataURL: processedCanvas.toDataURL('image/png'),
                 processingTime,
-                pipeline: 'ine_optimized'
+                pipeline: 'ine_optimized_with_card_detection'
             };
 
         } catch (error) {
