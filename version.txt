@@ -1,13 +1,11 @@
-6e8a8f0
-2025-10-22T08:30:00Z
-All fixes applied including:
-- CardDetector fallback normalization
-- detector.detect() method usage
-- Service Worker file list corrected
-- Tesseract.js v5 without logger
-- Layout class name corrected (INELayout)
-- Static method calls for INEValidators
-- ONNX models disabled (no 404s)
-- Templates disabled (no 404s)
-- Canvas support in loadImage
-Build: v1.0.9
+bc8f462
+2025-10-22T09:00:00Z
+Major Release: OCR Precision Improvements
+- Model detection defaults to INE_2019 (most common)
+- Keyword-based model detection heuristics
+- Contrast enhancement (+30%) before OCR
+- Brightness normalization (adaptive)
+- Sharpening filter for text edges
+- Calibrated ROI coordinates for INE_2019
+- All previous fixes maintained
+Build: v1.1.0
