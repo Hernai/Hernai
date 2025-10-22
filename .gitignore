@@ -1,0 +1,48 @@
+# HernAI - Git Ignore File
+
+# OS Files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor Files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Node modules (if added later)
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Build output (if added later)
+dist/
+build/
+
+# Temp files
+*.tmp
+*.temp
+.cache/
+
+# Test images (don't commit real INE images)
+test-images/
+*.jpg
+*.jpeg
+*.png
+*.gif
+!assets/icons/*.png
+
+# Environment files
+.env
+.env.local
+
+# Logs
+logs/
+*.log
+
+# Package manager files
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
