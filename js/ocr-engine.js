@@ -88,8 +88,12 @@ class OCREngine {
             await this.tesseractWorker.setParameters({
                 tessedit_pageseg_mode: this.config.tesseract.psm,
                 tessedit_ocr_engine_mode: this.config.tesseract.oem,
-                preserve_interword_spaces: '1',
+                preserve_interword_spaces: '1',  // Preservar espacios entre palabras
                 tessedit_char_whitelist: 'ABCDEFGHIJKLMNÑOPQRSTUVWXYZÁÉÍÓÚabcdefghijklmnñopqrstuvwxyzáéíóú0123456789 .,-/',
+                // Parámetros adicionales para mejorar detección de espacios
+                tosp_min_sane_kn_sp: '1.5',  // Espacio mínimo entre palabras (más sensible)
+                tosp_old_to_method: '0',  // Usar nuevo método de detección de espacios
+                tosp_old_to_bug_fix: '1',  // Activar fix de bugs de espacios
             });
 
             console.log('[OCR] Tesseract.js loaded successfully');

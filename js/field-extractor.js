@@ -748,24 +748,21 @@ class FieldExtractor {
      */
     parseNameFromBarcode(barcode) {
         // Format examples:
-        // "GONZALEZCVIDALEIVERCFABIAN"
-        // "GONZALEZCVIDALCIVERCFABIAN"
+        // "GONZALEZCVIDALCIVERCFABIAN" → GONZALEZ VIDAL IVER FABIAN
 
         console.log('[FieldExtractor] Parsing barcode:', barcode);
 
-        // Pattern: APELLIDO1 C APELLIDO2 C NOMBRE
-        // Split by 'C' but handle cases where C appears in name
+        // Pattern: APELLIDO1 C APELLIDO2 C NOMBRE(S)
+        // Split by 'C' to separate components
         const parts = barcode.split('C').filter(p => p && p.length > 1);
 
         if (parts.length >= 3) {
             const apellidoPaterno = parts[0];
             const apellidoMaterno = parts[1];
-            // Join remaining parts as nombres, cleaning common OCR errors
-            let nombres = parts.slice(2).join(' ')
-                .replace(/EIVER/g, 'IVER')  // Fix EIVER → IVER
-                .replace(/CFABIAN/g, 'FABIAN')  // Fix extra C
-                .trim();
+            // Join remaining parts as nombres (sin fix de EIVER porque IVER es correcto)
+            let nombres = parts.slice(2).join(' ').trim();
 
+            // Construir nombre completo: APELLIDO_PATERNO APELLIDO_MATERNO NOMBRE(S)
             const fullName = [apellidoPaterno, apellidoMaterno, nombres]
                 .filter(p => p)
                 .join(' ');
@@ -775,7 +772,6 @@ class FieldExtractor {
         }
 
         // Fallback: try to split by common patterns
-        // Example: GONZALEZVIDALEIVERFABIAN → try to find name patterns
         return '';
     }
 
