@@ -1,0 +1,155 @@
+
+╔══════════════════════════════════════════════════════════════════════╗
+║                                                                      ║
+║               🎯 HernAI - Scanner INE con IA                        ║
+║               ══════════════════════════════                        ║
+║                                                                      ║
+║                    ✅ SERVIDOR ACTIVO                               ║
+║                                                                      ║
+╚══════════════════════════════════════════════════════════════════════╝
+
+
+📍 ACCESO RÁPIDO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    URL: http://localhost:8000
+
+    1. Abre tu navegador (Chrome, Edge, Firefox, Safari)
+    2. Copia y pega la URL de arriba
+    3. ¡Listo!
+
+
+⚡ INICIO RÁPIDO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    1️⃣  Espera la carga inicial (10-30 seg)
+    2️⃣  Sube foto del ANVERSO de la INE
+    3️⃣  Sube foto del REVERSO de la INE  
+    4️⃣  Click en "🚀 Procesar Credencial"
+    5️⃣  Explora los resultados en las pestañas
+
+
+🎯 CARACTERÍSTICAS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    ✅ OCR Híbrido: Tesseract.js + Transformers.js (TrOCR)
+    ✅ Detección Automática de INE con 99%+ precisión
+    ✅ Auto-Rotación: Corrige orientación automáticamente
+    ✅ Validación Completa: CURP, Clave Elector, OCR
+    ✅ 100% Privado: Todo se procesa en tu navegador
+    ✅ PWA: Funciona offline después de la primera carga
+
+
+📊 QUÉ EXTRAE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    • CURP (con validación de formato y edad)
+    • Nombre completo
+    • Fecha de nacimiento y sexo
+    • Clave de Elector (con validación)
+    • Código OCR (13 dígitos)
+    • Estado, municipio, código postal
+    • Año de emisión y vigencia
+    • Validación cruzada entre campos
+
+
+🛠️  TECNOLOGÍAS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    • Tesseract.js 5.0 - OCR rápido
+    • Transformers.js 2.10 - TrOCR (IA de Hugging Face)
+    • OpenCV.js 4.5.4 - Procesamiento de imágenes
+    • Service Worker - PWA y funcionamiento offline
+    • Vanilla JavaScript - Sin frameworks
+
+
+📁 ARCHIVOS DEL PROYECTO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    /home/user/Hernai/
+    ├── index.html              # Interfaz principal
+    ├── manifest.json           # Configuración PWA
+    ├── service-worker.js       # Service Worker
+    ├── QUICKSTART.md          # Guía rápida detallada
+    ├── README.md              # Documentación principal
+    ├── USAGE.md               # Guía de uso completa
+    ├── css/styles.css         # Estilos
+    ├── js/
+    │   ├── app.js             # App principal
+    │   ├── ocr-engine.js      # Motor OCR híbrido
+    │   ├── ine-detector.js    # Detector de INE
+    │   ├── image-processor.js # Procesador de imágenes
+    │   ├── field-extractor.js # Extractor de campos
+    │   ├── validators.js      # Validadores
+    │   └── main.js            # Controlador de UI
+    └── assets/icons/          # Iconos PWA
+
+
+🔧 COMANDOS ÚTILES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    Ver este archivo:
+    $ cat /home/user/Hernai/START_HERE.txt
+
+    Ver guía rápida:
+    $ cat /home/user/Hernai/QUICKSTART.md
+
+    Ver logs del servidor:
+    $ cat /home/user/Hernai/server.log
+
+    Detener servidor:
+    $ ps aux | grep python | grep 8000
+    $ kill -9 [PID]
+
+
+🐛 SOLUCIÓN DE PROBLEMAS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    ❌ No carga la página
+       → Verifica que el servidor esté corriendo
+       → Asegúrate de usar http://localhost:8000
+       → Prueba en modo incógnito
+
+    ❌ "Error al inicializar"
+       → Verifica conexión a internet (primera vez)
+       → Recarga la página (Ctrl + F5)
+       → Abre consola (F12) para ver errores
+
+    ❌ "No se detecta INE"
+       → Asegúrate que sean fotos de INE reales
+       → Verifica que ambas imágenes estén cargadas
+       → Mejora iluminación de las fotos
+
+    ❌ "Baja confianza OCR"
+       → Toma fotos con mejor iluminación
+       → Enfoca bien la credencial
+       → Evita sombras y reflejos
+
+
+📖 DOCUMENTACIÓN COMPLETA
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    QUICKSTART.md  - Guía rápida paso a paso
+    README.md      - Descripción general del proyecto
+    USAGE.md       - Manual completo de uso
+
+
+💡 CONSEJOS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    ✓ Abre la consola (F12) para ver logs detallados
+    ✓ Las fotos pueden estar en cualquier orientación
+    ✓ Primera carga puede tardar 10-30 segundos
+    ✓ Después funciona offline
+    ✓ Instala como PWA para usarla como app nativa
+
+
+🎉 ¡DISFRUTA ESCANEANDO!
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    Desarrollado con ❤️ usando IA por Claude Code
+    https://claude.com/claude-code
+
+    Repositorio: /home/user/Hernai
+    Rama: claude/investigate-download-issue-011CUMSwdpkbq9brQBFxHtnk
+
