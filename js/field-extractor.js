@@ -1351,7 +1351,7 @@ class FieldExtractor {
         // 2. Upscale small regions for better OCR (< 200px width)
         let processedCanvas = temp;
         if (temp.width < 200 || temp.height < 40) {
-            const scaleFactor = 2.5;
+            const scaleFactor = 3.0;  // Aumentado de 2.5 a 3.0
             const scaledCanvas = document.createElement('canvas');
             scaledCanvas.width = temp.width * scaleFactor;
             scaledCanvas.height = temp.height * scaleFactor;
@@ -1363,8 +1363,11 @@ class FieldExtractor {
             console.log(`[FieldExtractor] Upscaled region from ${temp.width}×${temp.height} to ${scaledCanvas.width}×${scaledCanvas.height}`);
         }
 
-        // 3. Apply OCR-optimized preprocessing
-        return this.preprocessForOCR(processedCanvas);
+        // 3. NO aplicar preprocessing agresivo - Tesseract funciona mejor con imagen original
+        // El preprocesamiento global de image-processor.js ya hizo CLAHE, denoise, etc.
+        // Aplicar más procesamiento puede BORRAR el texto en regiones pequeñas
+        console.log(`[FieldExtractor] Skipping heavy preprocessing for region (Tesseract works better with original)`);
+        return processedCanvas;
     }
 
     /**

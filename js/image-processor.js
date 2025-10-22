@@ -736,8 +736,10 @@ class ImageProcessor {
             // Step 7: Sharpen text - ONLY on text regions
             processedCanvas = await this.sharpen(processedCanvas);
 
-            // Step 8: Advanced binarization with morphology - ONLY on text regions
-            processedCanvas = await this.binarize(processedCanvas);
+            // Step 8: SKIP binarization - Tesseract works BETTER with grayscale images
+            // Binarization was REMOVING text and causing 0% confidence
+            // CLAHE + denoise + sharpen is sufficient for good OCR
+            console.log('[ImageProcessor] ⚠️ Skipping binarization - using grayscale for better OCR');
 
             // Step 9: Apply text mask to zero out photo area
             if (textMask && this.isOpenCVReady) {
