@@ -1,12 +1,18 @@
 # Progreso INE Scanner - Actualización
 
 **Fecha**: 2025-10-22
-**Progreso**: ~55% completado
+**Progreso**: ~75% completado ⚡ **FASE 1 COMPLETA** ⚡
 **Branch**: `claude/investigate-download-issue-011CUMSwdpkbq9brQBFxHtnk`
 
 ---
 
-## ✅ COMPLETADO RECIENTEMENTE
+## 🎉 FASE 1 COMPLETADA (Core Pipeline) ✅
+
+**Commits recientes**:
+- `fd378e3` - app.js: runINEPipeline() con JSON exacto ✅
+- `37c47b7` - field-extractor + ocr-corrector completos ✅
+- `f055530` - ocr-engine.js con ZXing + whitelists ✅
+- `1dfc634` - ine-detector.js con classifyModel() ✅
 
 ### ine-detector.js (100%) ✅
 **Commit**: `1dfc634`
@@ -114,188 +120,76 @@ class OCREngine {
 }
 ```
 
-#### 2. field-extractor.js (Actualizar para bbox)
-**Estado**: 40% → Retornar `{value, confidence, bbox, source}`
+### field-extractor.js (100%) ✅
+**Commit**: `37c47b7`
 
-```javascript
-async extractField(fieldKey, ocrResult, layout, model, side, W, H) {
-    // 1. getRegion() del layout
-    const region = layout.getRegion(model, side, fieldKey, W, H);
+Agregados todos los métodos de extracción con bbox:
 
-    // 2. Recortar canvas
-    const croppedCanvas = this.cropRegion(canvas, region);
+1. **extractFieldWithBbox()** - Extrae campo individual con región del layout
+2. **cropRegion()** - Recorta canvas [x,y,w,h]
+3. **extractFrontFields()** - Extrae todos los campos del anverso
+4. **extractBackFields()** - Extrae todos los campos del reverso
+5. **mergeQRWithOCR()** - Fusiona datos QR con OCR (similarity ≥ 0.90)
+6. **validateFieldValue()** - Valida usando validators.js
+7. **getFieldType()** - Mapea a whitelists del OCR
 
-    // 3. OCR con whitelist
-    const result = await this.ocr.recognize(croppedCanvas, {
-        fieldType: this.getFieldType(fieldKey),
-        psm: 7  // Single line
-    });
+**Resultado**: Retorna `{value, confidence, bbox: [x,y,w,h], source: 'ocr'|'qr'|'ocr+qr'}`
 
-    // 4. Normalizar y validar
-    const value = this.ocrCorrector.correctText(result.text, {type: fieldType});
-    const validation = this.validateField(fieldKey, value);
+### ocr-corrector.js (100%) ✅
+**Commit**: `37c47b7`
 
-    let confidence = result.confidence;
-    if (validation.valid) confidence += 10;
+Agregados los métodos faltantes:
 
-    // 5. Retornar con bbox
-    return {
-        value,
-        confidence: Math.min(100, confidence),
-        bbox: [region.x, region.y, region.w, region.h],
-        source: 'ocr'
-    };
-}
+1. **fixOcrConfusions()** - Corrige 0↔O, 1↔I, 5↔S, 8↔B según tipo
+   - `alphanumeric_id`: Position-based (primeros 4 = letras, 4-9 = números)
+   - `numeric_id`: Todo a números
+   - `text`: Todo a letras
 
-cropRegion(canvas, region) {
-    const temp = document.createElement('canvas');
-    temp.width = region.w;
-    temp.height = region.h;
-    const ctx = temp.getContext('2d');
-    ctx.drawImage(canvas, region.x, region.y, region.w, region.h, 0, 0, region.w, region.h);
-    return temp;
-}
-```
+2. **levenshteinSimilarity()** - Calcula similitud (0.0 a 1.0)
+   - 1.0 = idéntico
+   - 0.0 = completamente diferente
 
-#### 3. ocr-corrector.js (Agregar fixOcrConfusions + merge)
-**Estado**: 80% → Solo faltan 2 métodos
+3. **mergeQRAndOCR()** - Fusiona QR con OCR
+   - Si similarity ≥ 0.90 → boost confidence +15
+   - Si OCR confidence < 75 → reemplaza con QR
+   - Agrega campos solo-QR
 
-```javascript
-fixOcrConfusions(text, fieldType) {
-    let corrected = text;
+### app.js (100%) ✅
+**Commit**: `fd378e3`
 
-    if (fieldType === 'alphanumeric_id') {
-        // Position-based para CURP/Clave
-        for (let i = 0; i < text.length; i++) {
-            const char = text[i];
-            if (i < 4) {
-                // Letras
-                if (char === '0') corrected = corrected.replace(char, 'O');
-                if (char === '1') corrected = corrected.replace(char, 'I');
-            } else if (i >= 4 && i < 10) {
-                // Números (fecha)
-                if (char === 'O') corrected = corrected.replace(char, '0');
-                if (char === 'I') corrected = corrected.replace(char, '1');
-            }
-        }
-    } else if (fieldType === 'numeric_id') {
-        corrected = corrected.replace(/O/gi, '0');
-        corrected = corrected.replace(/I/gi, '1');
-        corrected = corrected.replace(/S/gi, '5');
-        corrected = corrected.replace(/B/gi, '8');
-    }
+Agregado método completo `runINEPipeline()`:
 
-    return corrected;
-}
+**Pipeline en 6 fases**:
 
-mergeQRAndOCR(ocrData, qrPayloads) {
-    const merged = { ...ocrData };
+1. **Preprocesamiento** → Card detection + normalization a 1012×638px
+2. **Clasificación** → classifySide() + classifyModel()
+3. **OCR** → extractFrontFields() o extractBackFields()
+4. **QR Codes** → detectQRCodes() con ZXing
+5. **Post-procesamiento** → mergeQRWithOCR() + confidence_overall
+6. **Resultado** → JSON estructurado exacto
 
-    for (const qr of qrPayloads) {
-        if (!qr.ok) continue;
-
-        try {
-            const qrData = JSON.parse(qr.text);
-
-            for (const [key, value] of Object.entries(qrData)) {
-                const normalizedKey = key.toLowerCase();
-
-                if (merged[normalizedKey]) {
-                    // Comparar similarity
-                    const sim = this.levenshteinSimilarity(
-                        merged[normalizedKey].value,
-                        value
-                    );
-
-                    if (sim >= 0.90) {
-                        // Boost confidence
-                        merged[normalizedKey].confidence += 15;
-                        merged[normalizedKey].source = 'ocr+qr';
-                    } else if (qr.confidence > merged[normalizedKey].confidence) {
-                        // Reemplazar con QR
-                        merged[normalizedKey].value = value;
-                        merged[normalizedKey].source = 'qr';
-                        merged[normalizedKey].confidence = 95;
-                    }
-                } else {
-                    // Solo en QR
-                    merged[normalizedKey] = {
-                        value, confidence: 95, source: 'qr', bbox: []
-                    };
-                }
-            }
-        } catch (e) {
-            // No-JSON QR
-        }
-    }
-
-    return merged;
-}
-
-levenshteinSimilarity(str1, str2) {
-    const dist = this.levenshteinDistance(str1, str2);
-    const maxLen = Math.max(str1.length, str2.length);
-    return maxLen === 0 ? 1.0 : 1.0 - (dist / maxLen);
-}
-```
-
-#### 4. app.js (JSON estructurado + timings)
-**Estado**: 30% → Actualizar formato de salida
-
-```javascript
-async runINEPipeline(file, onProgress) {
-    const timings = {
-        pre: 0,
-        classify: 0,
-        ocr: 0,
-        qr: 0,
-        post: 0
-    };
-
-    const t0 = performance.now();
-
-    // ... pipeline ...
-
-    const t1 = performance.now();
-    timings.pre = Math.round(t1 - t0);
-
-    // ... clasificación ...
-    timings.classify = Math.round(performance.now() - t1);
-
-    // ... OCR ...
-    timings.ocr = ...;
-
-    // ... QR ...
-    timings.qr = ...;
-
-    // ... post-processing ...
-    timings.post = ...;
-
-    // RETORNAR FORMATO EXACTO:
-    return {
-        side: "front" | "back",
-        model: "INE_2019" | "INE_2023" | "INE_v3_1" | "unknown",
-        image_size_px: { w: 1012, h: 638 },
-        fields: {
-            nombre: { value: "", confidence: 0, bbox: [x,y,w,h], source: "ocr" },
-            sexo: { value: "H|M", confidence: 0, bbox: [], source: "ocr" },
-            domicilio: { value: "", confidence: 0, bbox: [], source: "ocr" },
-            clave_elector: { value: "", confidence: 0, bbox: [], source: "ocr|qr" },
-            curp: { value: "", confidence: 0, bbox: [], source: "ocr|qr" },
-            fecha_nacimiento: { value: "dd/mm/aaaa", confidence: 0, bbox: [], source: "ocr" },
-            seccion: { value: "####", confidence: 0, bbox: [], source: "ocr" },
-            anio_registro: { value: "####", confidence: 0, bbox: [], source: "ocr" },
-            vigencia: { value: "yyyy-yyyy", confidence: 0, bbox: [], source: "ocr" },
-            mrz: { value: "", confidence: 0, bbox: [], source: "ocr" },
-            qr_payloads: [{ index: 0, text: "...", ok: true }]
-        },
-        confidence_overall: 0.0,
-        timings_ms: timings
-    };
+**JSON Output**:
+```json
+{
+  "side": "front",
+  "model": "INE_2023",
+  "image_size_px": {"w": 1012, "h": 638},
+  "fields": {
+    "nombre": {"value": "...", "confidence": 85, "bbox": [x,y,w,h], "source": "ocr"},
+    "curp": {"value": "...", "confidence": 95, "bbox": [...], "source": "ocr+qr"},
+    "qr_payloads": [{"index": 0, "text": "{...}", "ok": true}]
+  },
+  "confidence_overall": 87.5,
+  "timings_ms": {"pre": 120, "classify": 45, "ocr": 1850, "qr": 230, "post": 35}
 }
 ```
 
 ---
+
+## 🎯 SIGUIENTES PASOS: FASE 2 - Anti-Fraude (0%)
+
+**Prioridad**: Media
+**Tiempo estimado**: 3-4 horas
 
 ### Fase 2 - Anti-Fraude (0%)
 
@@ -320,43 +214,55 @@ Ver `IMPLEMENTATION_PLAN.md` para código completo de:
 
 | Archivo | Estado | % |
 |---------|--------|---|
+| **FASE 1 - CORE PIPELINE** | **✅** | **100** |
 | layout.js | ✅ | 100 |
 | onnx-runtime.js | ✅ | 100 |
 | ai-field-extractor.js | ✅ | 100 |
 | validators.js | ✅ | 100 |
 | card-detector.js | ✅ | 100 |
 | image-processor.js | ✅ | 100 |
-| **ine-detector.js** | **✅** | **100** |
-| ocr-engine.js | 🔶 | 60 |
-| field-extractor.js | 🔶 | 40 |
-| ocr-corrector.js | 🔶 | 80 |
-| app.js | 🔶 | 30 |
+| ine-detector.js | ✅ | 100 |
+| ocr-engine.js | ✅ | 100 |
+| field-extractor.js | ✅ | 100 |
+| ocr-corrector.js | ✅ | 100 |
+| app.js | ✅ | 100 |
+| **FASE 2 - ANTI-FRAUDE** | **❌** | **0** |
 | dedupe-hash.js | ❌ | 0 |
 | antifraud-moire.js | ❌ | 0 |
 | antifraud-ela.js | ❌ | 0 |
 | link-front-back.js | ❌ | 0 |
 | face-match.js | ❌ | 0 |
+| **FASE 3 - UI** | **❌** | **0** |
 | index.html | ❌ | 0 |
 | main.js | ❌ | 0 |
 | service-worker.js | ❌ | 0 |
-| **TOTAL** | **🔶** | **55%** |
+| **TOTAL** | **🔶** | **~75%** |
 
 ---
 
-## 🎯 Siguientes Pasos
+## 🎯 Opciones para Continuar
 
-1. **Completar ocr-engine.js** (ZXing + whitelists)
-2. **Actualizar field-extractor.js** (bbox + confidence)
-3. **Completar ocr-corrector.js** (2 métodos faltantes)
-4. **Actualizar app.js** (JSON + timings)
-5. **Commit Fase 1 completa**
-6. **Iniciar Fase 2** (anti-fraude)
-7. **Fase 3** (UI)
+### Opción A: Implementar Anti-Fraude (Fase 2)
+**Tiempo**: ~3-4 horas
+**Archivos**: 5 nuevos módulos
+**Resultado**: Sistema completo con detección de recapturas, duplicados, ediciones
+
+### Opción B: Implementar UI (Fase 3)
+**Tiempo**: ~2-3 horas
+**Archivos**: index.html, main.js, service-worker.js
+**Resultado**: Interfaz funcional para probar el scanner
+
+### Opción C: Testing y Refinamiento
+**Tiempo**: ~2 horas
+**Resultado**: Pruebas, correcciones, optimizaciones del core pipeline
 
 ---
 
-**Commits recientes**:
-- `1dfc634` - ine-detector.js completo ✅
+**Commits completados (Fase 1)**:
+- `fd378e3` - app.js: runINEPipeline() ✅
+- `37c47b7` - field-extractor + ocr-corrector ✅
+- `f055530` - ocr-engine.js ✅
+- `1dfc634` - ine-detector.js ✅
 - `be736bf` - card-detector + image-processor ✅
 - `db00bee` - validators ✅
 - `cefe8a9` - infraestructura ✅
