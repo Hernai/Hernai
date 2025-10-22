@@ -1,14 +1,18 @@
 # Progreso INE Scanner - Actualización
 
 **Fecha**: 2025-10-22
-**Progreso**: ~75% completado ⚡ **FASE 1 COMPLETA** ⚡
+**Progreso**: ~90% completado ⚡ **FASE 1 + FASE 2 COMPLETAS** ⚡
 **Branch**: `claude/investigate-download-issue-011CUMSwdpkbq9brQBFxHtnk`
 
 ---
 
-## 🎉 FASE 1 COMPLETADA (Core Pipeline) ✅
+## 🎉 FASE 1 + FASE 2 COMPLETADAS ✅✅
 
-**Commits recientes**:
+**Commits recientes (Fase 2)**:
+- `f09cb35` - app.js: Integración anti-fraude completa ✅
+- `abfa0b3` - 5 módulos anti-fraude creados ✅
+
+**Commits anteriores (Fase 1)**:
 - `fd378e3` - app.js: runINEPipeline() con JSON exacto ✅
 - `37c47b7` - field-extractor + ocr-corrector completos ✅
 - `f055530` - ocr-engine.js con ZXing + whitelists ✅
@@ -186,19 +190,99 @@ Agregado método completo `runINEPipeline()`:
 
 ---
 
-## 🎯 SIGUIENTES PASOS: FASE 2 - Anti-Fraude (0%)
+## 🎉 FASE 2 - Anti-Fraude (100%) ✅
 
-**Prioridad**: Media
-**Tiempo estimado**: 3-4 horas
+**Módulos completados**:
 
-### Fase 2 - Anti-Fraude (0%)
+### 1. dedupe-hash.js (420 líneas) ✅
+**Commit**: `abfa0b3`
 
-Ver `IMPLEMENTATION_PLAN.md` para código completo de:
-1. dedupe-hash.js
-2. antifraud-moire.js
-3. antifraud-ela.js
-4. link-front-back.js
-5. face-match.js
+- **pHash (Perceptual Hash)** con DCT (Discrete Cosine Transform)
+- **aHash (Average Hash)** basado en promedio de píxeles
+- **Hamming distance** para comparar hashes
+- **compareImages()** - Retorna similitud y clasificación
+- **detectDuplicates()** - Analiza conjunto de imágenes
+- **Thresholds**: identical(0), duplicate(≤5), similar(≤15)
+
+### 2. antifraud-moire.js (500 líneas) ✅
+**Commit**: `abfa0b3`
+
+- **FFT 2D** (Fast Fourier Transform) usando algoritmo Cooley-Tukey
+- **analyzeFrequencySpectrum()** - Analiza espectro de frecuencias
+- **detectPeriodicPeaks()** - Detecta picos característicos de moiré
+- **Detección de simetría** en picos (indicador fuerte de moiré)
+- **moireScore** (0-1), clasificación: low|medium|high|critical
+- Detecta recapturas de pantalla y fotos de foto
+
+### 3. antifraud-ela.js (540 líneas) ✅
+**Commit**: `abfa0b3`
+
+- **Error Level Analysis** - Re-compresión JPEG al 95%
+- **calculateErrorMap()** - Diferencia pixel por pixel
+- **detectSuspiciousRegions()** - Flood fill para regiones editadas
+- **Operaciones morfológicas** (erosión/dilatación)
+- **manipulationScore** (0-100), clasificación de riesgo
+- Detecta photoshop, clonación, adiciones digitales
+
+### 4. link-front-back.js (420 líneas) ✅
+**Commit**: `abfa0b3`
+
+- **Validación cruzada** anverso ↔ reverso
+- **8 checks de consistencia**:
+  * CURP consistency (debe coincidir si está en ambos)
+  * Name vs CURP initials
+  * Sex vs CURP position 10
+  * Birth date vs CURP positions 4-9
+  * Clave Elector format validation
+  * OCR code presence (13 digits)
+  * QR codes presence (2-3 expected)
+  * Side detection correctness
+- **consistencyScore** (0-100), warnings y errores
+
+### 5. face-match.js (440 líneas) ✅
+**Commit**: `abfa0b3`
+
+- **face-api.js** si está disponible (detección avanzada)
+- **Fallback básico**: histograma + estructura (SSIM)
+- **Distancia euclidiana** entre descriptores faciales
+- **Chi-Squared** para comparación de histogramas
+- **extractFaceRegion()** - Extrae rostro de INE
+- Similarity score (0-1), confidence: high|medium|low|very_low
+
+### 6. Integración en app.js ✅
+**Commit**: `f09cb35`
+
+**Nuevo método**: `runINEPipelineWithAntiFraud(frontImage, backImage)`
+
+**Pipeline completo en 8 fases**:
+1-5. Procesar anverso y reverso individualmente
+6. Anti-fraud detection (duplicate + moiré + ELA)
+7. Cross-validation (8 checks)
+8. Build complete result
+
+**JSON Output**:
+```json
+{
+  "front": {...},
+  "back": {...},
+  "combined_fields": {...},
+  "confidence_overall": 87.5,
+  "cross_validation": {
+    "is_consistent": true,
+    "consistency_score": 92
+  },
+  "antifraud": {
+    "score": 85,
+    "risk_level": "low",
+    "signals": {
+      "duplicate_detection": {...},
+      "moire_detection": {...},
+      "tampering_detection": {...}
+    }
+  },
+  "timings_ms": {...}
+}
+```
 
 ---
 
@@ -226,39 +310,52 @@ Ver `IMPLEMENTATION_PLAN.md` para código completo de:
 | field-extractor.js | ✅ | 100 |
 | ocr-corrector.js | ✅ | 100 |
 | app.js | ✅ | 100 |
-| **FASE 2 - ANTI-FRAUDE** | **❌** | **0** |
-| dedupe-hash.js | ❌ | 0 |
-| antifraud-moire.js | ❌ | 0 |
-| antifraud-ela.js | ❌ | 0 |
-| link-front-back.js | ❌ | 0 |
-| face-match.js | ❌ | 0 |
+| **FASE 2 - ANTI-FRAUDE** | **✅** | **100** |
+| dedupe-hash.js | ✅ | 100 |
+| antifraud-moire.js | ✅ | 100 |
+| antifraud-ela.js | ✅ | 100 |
+| link-front-back.js | ✅ | 100 |
+| face-match.js | ✅ | 100 |
+| app.js (anti-fraud integration) | ✅ | 100 |
 | **FASE 3 - UI** | **❌** | **0** |
 | index.html | ❌ | 0 |
 | main.js | ❌ | 0 |
 | service-worker.js | ❌ | 0 |
-| **TOTAL** | **🔶** | **~75%** |
+| **TOTAL** | **🔶** | **~90%** |
 
 ---
 
-## 🎯 Opciones para Continuar
+## 🎯 ÚLTIMO PASO: FASE 3 - UI (10% restante)
 
-### Opción A: Implementar Anti-Fraude (Fase 2)
-**Tiempo**: ~3-4 horas
-**Archivos**: 5 nuevos módulos
-**Resultado**: Sistema completo con detección de recapturas, duplicados, ediciones
+**Tiempo estimado**: ~2-3 horas
+**Archivos pendientes**: 3 archivos
 
-### Opción B: Implementar UI (Fase 3)
-**Tiempo**: ~2-3 horas
-**Archivos**: index.html, main.js, service-worker.js
-**Resultado**: Interfaz funcional para probar el scanner
+### Fase 3 - UI y PWA (0%)
 
-### Opción C: Testing y Refinamiento
-**Tiempo**: ~2 horas
-**Resultado**: Pruebas, correcciones, optimizaciones del core pipeline
+1. **index.html** - Interfaz web completa:
+   - Drag & drop para anverso y reverso
+   - Vista previa de imágenes
+   - Botones: "Procesar", "Procesar con Anti-Fraude", "Descargar JSON"
+   - Display de resultados en tiempo real
+   - Badges de confianza y riesgo
+
+2. **main.js** - Lógica de UI:
+   - Event handlers para drag & drop
+   - Procesamiento con progress callbacks
+   - Renderizado de resultados JSON
+   - loadDemoImages() - Cargar ejemplos
+   - downloadJSON() - Descargar resultados
+
+3. **service-worker.js** - PWA offline:
+   - Cache de assets (JS, CSS, modelos)
+   - Offline-first strategy
+   - Update notifications
 
 ---
 
-**Commits completados (Fase 1)**:
+**Commits completados (Fase 1 + Fase 2)**:
+- `f09cb35` - app.js: Integración anti-fraude ✅
+- `abfa0b3` - 5 módulos anti-fraude ✅
 - `fd378e3` - app.js: runINEPipeline() ✅
 - `37c47b7` - field-extractor + ocr-corrector ✅
 - `f055530` - ocr-engine.js ✅
