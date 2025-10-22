@@ -1,0 +1,9 @@
+8308e80
+2025-10-22T08:00:00Z
+All fixes applied including:
+- CardDetector fallback normalization
+- detector.detect() method usage
+- Service Worker file list corrected
+- Tesseract.js v5 without logger
+- Layout class name corrected (INELayout)
+Build: v1.0.7

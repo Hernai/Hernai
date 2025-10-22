@@ -568,11 +568,16 @@
 
     <!-- Service Worker Registration -->
     <script>
+        // Log build version
+        console.log('🔧 Hernai INE Scanner - Build v1.0.7 - Commit: 8308e80');
+        console.log('📅 Build Date: 2025-10-22T08:00:00Z');
+        console.log('✅ All fixes applied: CardDetector fallback, detector.detect(), SW corrected, Tesseract v5, Layout→INELayout');
+
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register('service-worker.js')
-                    .then(reg => console.log('Service Worker registered:', reg))
-                    .catch(err => console.log('Service Worker registration failed:', err));
+                    .then(reg => console.log('[SW] Service Worker registered:', reg))
+                    .catch(err => console.log('[SW] Service Worker registration failed:', err));
             });
         }
     </script>
